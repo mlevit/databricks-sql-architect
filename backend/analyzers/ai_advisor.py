@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 AI_MODEL = "databricks-claude-opus-4-6"
 
 
-def build_rewrite_prompt(analysis: AnalysisResult) -> str:
+def build_rewrite_prompt(analysis: AnalysisResult, custom_instruction: str | None = None) -> str:
     parts = [
         "You are a Databricks SQL performance expert. Analyze the following query and the "
         "performance issues identified, then provide an optimized rewrite of the SQL.\n",
@@ -33,6 +33,9 @@ def build_rewrite_prompt(analysis: AnalysisResult) -> str:
                          f"{_human_bytes(t.size_in_bytes)}, "
                          f"clustering={t.clustering_columns or 'none'}, "
                          f"partitions={t.partition_columns or 'none'}")
+
+    if custom_instruction:
+        parts.append(f"\n## Custom User Instruction\n{custom_instruction}\n")
 
     parts.append(
         "\n## Instructions\n"
@@ -61,8 +64,8 @@ def build_rewrite_prompt(analysis: AnalysisResult) -> str:
     return "\n".join(parts)
 
 
-def rewrite_query(analysis: AnalysisResult) -> AIRewriteResult:
-    prompt = build_rewrite_prompt(analysis)
+def rewrite_query(analysis: AnalysisResult, custom_instruction: str | None = None) -> AIRewriteResult:
+    prompt = build_rewrite_prompt(analysis, custom_instruction=custom_instruction)
     escaped = prompt.replace("'", "''")
 
     sql = f"SELECT ai_query('{AI_MODEL}', '{escaped}') AS suggestion"

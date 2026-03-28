@@ -126,8 +126,12 @@ async def analyze(statement_id: str):
         raise HTTPException(status_code=500, detail="Internal analysis error") from None
 
 
+class RewriteRequest(BaseModel):
+    custom_instruction: str | None = None
+
+
 @app.post("/api/rewrite/{statement_id}", response_model=AIRewriteResult)
-async def rewrite(statement_id: str):
+async def rewrite(statement_id: str, req: RewriteRequest | None = None):
     _validate_statement_id(statement_id)
 
     analysis = _cache_get(statement_id)
@@ -141,8 +145,10 @@ async def rewrite(statement_id: str):
             logger.exception("Analysis failed for %s", statement_id)
             raise HTTPException(status_code=500, detail="Internal analysis error") from None
 
+    custom_instruction = req.custom_instruction if req else None
+
     try:
-        return rewrite_query(analysis)
+        return rewrite_query(analysis, custom_instruction=custom_instruction)
     except Exception:
         logger.exception("AI rewrite failed for %s", statement_id)
         raise HTTPException(status_code=500, detail="AI rewrite failed") from None

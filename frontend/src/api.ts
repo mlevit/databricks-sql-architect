@@ -82,9 +82,14 @@ export async function analyzeQueryStream(
   }
 }
 
-export function rewriteQuery(statementId: string): Promise<AIRewriteResult> {
+export function rewriteQuery(statementId: string, customInstruction?: string): Promise<AIRewriteResult> {
+  const body = customInstruction ? { custom_instruction: customInstruction } : undefined;
   return request<AIRewriteResult>(`${BASE}/rewrite/${encodeURIComponent(statementId)}`, {
     method: "POST",
+    ...(body && {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   });
 }
 

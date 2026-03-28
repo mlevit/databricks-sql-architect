@@ -423,6 +423,7 @@ export default function AIRewrite({ statementId, warehouseId }: Props) {
   const [benchmark, setBenchmark] = useState<BenchmarkResult | null>(null);
   const [benchLoading, setBenchLoading] = useState(false);
   const [benchError, setBenchError] = useState<string | null>(null);
+  const [customInstruction, setCustomInstruction] = useState("");
 
   const handleRewrite = async () => {
     setLoading(true);
@@ -430,7 +431,8 @@ export default function AIRewrite({ statementId, warehouseId }: Props) {
     setBenchmark(null);
     setBenchError(null);
     try {
-      const data = await rewriteQuery(statementId);
+      const instruction = customInstruction.trim() || undefined;
+      const data = await rewriteQuery(statementId, instruction);
       setResult(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Rewrite failed");
@@ -462,13 +464,31 @@ export default function AIRewrite({ statementId, warehouseId }: Props) {
       </p>
 
       {!result && (
-        <button
-          className="text-white bg-purple-700 hover:bg-purple-800 focus:ring-4 focus:ring-purple-300 font-medium rounded-lg text-sm px-5 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={handleRewrite}
-          disabled={loading}
-        >
-          {loading ? "Generating..." : "Generate AI Rewrite"}
-        </button>
+        <div className="flex flex-col gap-3">
+          <div>
+            <label htmlFor="custom-instruction" className="block text-sm font-medium text-gray-600 mb-1">
+              Custom instruction <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              id="custom-instruction"
+              className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 focus:outline-none transition-colors resize-y"
+              rows={2}
+              placeholder="e.g. Avoid using subqueries, prefer CTEs instead"
+              value={customInstruction}
+              onChange={(e) => setCustomInstruction(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+          <div>
+            <button
+              className="text-white bg-purple-700 hover:bg-purple-800 focus:ring-4 focus:ring-purple-300 font-medium rounded-lg text-sm px-5 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleRewrite}
+              disabled={loading}
+            >
+              {loading ? "Generating..." : "Generate AI Rewrite"}
+            </button>
+          </div>
+        </div>
       )}
 
       {error && (
@@ -531,6 +551,21 @@ export default function AIRewrite({ statementId, warehouseId }: Props) {
                 </pre>
               </div>
             </div>
+          </div>
+
+          <div className="mb-3">
+            <label htmlFor="custom-instruction-regen" className="block text-sm font-medium text-gray-600 mb-1">
+              Custom instruction <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              id="custom-instruction-regen"
+              className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 focus:outline-none transition-colors resize-y"
+              rows={2}
+              placeholder="e.g. Avoid using subqueries, prefer CTEs instead"
+              value={customInstruction}
+              onChange={(e) => setCustomInstruction(e.target.value)}
+              disabled={loading || benchLoading}
+            />
           </div>
 
           <div className="flex gap-3 flex-wrap">
