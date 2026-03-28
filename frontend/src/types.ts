@@ -8,6 +8,7 @@ export interface Recommendation {
   description: string;
   action?: string;
   snippet?: string;
+  impact: number;
 }
 
 export interface QueryMetrics {

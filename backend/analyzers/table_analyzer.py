@@ -222,6 +222,7 @@ def _analyze_single_table(
                 f"Alternatively, let Databricks choose automatically: "
                 f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
             ),
+            impact=7,
         ))
 
     # Small file problem
@@ -238,6 +239,7 @@ def _analyze_single_table(
                     "Many small files cause excessive metadata overhead and slow scans."
                 ),
                 action=f"OPTIMIZE {table_name}",
+                impact=6,
             ))
 
     # Partitioned but filter columns don't align
@@ -255,6 +257,7 @@ def _analyze_single_table(
                 "Add a filter on the partition column if possible, "
                 "or consider re-partitioning the table based on your most common query patterns."
             ),
+            impact=5,
         ))
 
     # D1: Table statistics staleness
@@ -285,6 +288,7 @@ def _analyze_single_table(
                     "even when you are unsure which columns to cluster on."
                 ),
                 action=f"ALTER TABLE {table_name} CLUSTER BY AUTO;",
+                impact=5,
             ))
 
     # D6: Under-partitioning
@@ -346,6 +350,7 @@ def _check_stats_staleness(
                 "decisions like join ordering and broadcast thresholds."
             ),
             action=f"ANALYZE TABLE {table_name} COMPUTE STATISTICS FOR ALL COLUMNS",
+            impact=4,
         ))
 
 
@@ -376,6 +381,7 @@ def _check_over_partitioned(
                 f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(partitions[:4])});\n"
                 f"OPTIMIZE {table_name};"
             ),
+            impact=5,
         ))
 
 
@@ -416,6 +422,7 @@ def _check_large_unorganized(
             "Every query must scan through unordered data, making data skipping impossible."
         ),
         action=action,
+        impact=7,
     ))
 
 
@@ -445,6 +452,7 @@ def _check_join_columns_not_clustered(
                 f"If this join pattern is common, consider including the join columns "
                 f"in the clustering key: ALTER TABLE {table_name} CLUSTER BY ({cols})"
             ),
+            impact=6,
         ))
 
 
@@ -478,6 +486,7 @@ def _check_under_partitioned(
                 f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(partitions[:4])});\n"
                 f"OPTIMIZE {table_name};"
             ),
+            impact=5,
         ))
 
 
@@ -510,6 +519,7 @@ def _check_high_cardinality_clustering_key(
                 f"Re-cluster on columns commonly used in filters (dates, status, region):\n"
                 f"ALTER TABLE {table_name} CLUSTER BY AUTO;\nOPTIMIZE {table_name};"
             ),
+            impact=5,
         ))
 
 
@@ -537,6 +547,7 @@ def _check_wide_table(
             "Consider splitting rarely-queried columns into a separate table "
             "joined by a shared key, or use SELECT with explicit column lists."
         ),
+        impact=3,
     ))
 
 
@@ -566,6 +577,7 @@ def _check_non_delta_format(
             f"CREATE TABLE {table_name}_delta USING DELTA AS SELECT * FROM {table_name};\n"
             "Or in-place: CONVERT TO DELTA (for Parquet tables)."
         ),
+        impact=6,
     ))
 
 
@@ -600,6 +612,7 @@ def _check_vacuum_needed(
                 "Set up a recurring job to vacuum tables regularly. "
                 "Default retention is 7 days (168 hours)."
             ),
+            impact=4,
         ))
 
 
@@ -637,6 +650,7 @@ def _check_inappropriate_data_types(
                 "ALTER TABLE " + table_name + " ALTER COLUMN <col> SET DATA TYPE "
                 "TIMESTAMP or DATE as appropriate."
             ),
+            impact=3,
         ))
 
     if bad_numbers:
@@ -654,6 +668,7 @@ def _check_inappropriate_data_types(
                 "ALTER TABLE " + table_name + " ALTER COLUMN <col> SET DATA TYPE "
                 "DECIMAL, DOUBLE, or BIGINT as appropriate."
             ),
+            impact=3,
         ))
 
 
@@ -684,6 +699,7 @@ def _check_string_enum_columns(
             "Consider mapping to integer codes with a lookup table, or accept the "
             "trade-off if readability is more important than compression."
         ),
+        impact=2,
     ))
 
 
@@ -721,6 +737,7 @@ def _check_large_table_no_date_clustering(
             f"ALTER TABLE {table_name} CLUSTER BY ({best_col});\n"
             f"OPTIMIZE {table_name};"
         ),
+        impact=6,
     ))
 
 
@@ -759,6 +776,7 @@ def _check_json_string_columns(
             f"ALTER TABLE {table_name} ALTER COLUMN <col> SET DATA TYPE VARIANT;\n"
             "Then use col:path.to.field instead of get_json_object()."
         ),
+        impact=5,
     ))
 
 
@@ -793,6 +811,7 @@ def _check_hive_partitioning(
             "Or let Databricks choose optimal columns automatically:\n"
             f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
         ),
+        impact=6,
     ))
 
 

@@ -28,6 +28,12 @@ class Recommendation(BaseModel):
     description: str
     action: Optional[str] = None
     snippet: Optional[str] = None
+    impact: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Estimated performance impact if addressed (1=minimal, 10=transformative)",
+    )
 
 
 class QueryMetrics(BaseModel):

@@ -92,6 +92,7 @@ def analyze_query_metrics(
                 "Consider using a larger warehouse, reducing data volume with filters, "
                 "or breaking the query into smaller stages."
             ),
+            impact=9,
         ))
 
     # Poor data-skipping / file pruning
@@ -115,6 +116,7 @@ def analyze_query_metrics(
                         "The query is scanning far more files than necessary."
                     ),
                     action=action,
+                    impact=8,
                 ))
 
     # Low IO cache hit rate
@@ -136,6 +138,7 @@ def analyze_query_metrics(
                 "If this query runs frequently, consider using a warehouse with "
                 "local SSD caching or check if the data is changing too often for caching."
             ),
+            impact=2,
         ))
 
     # High shuffle
@@ -159,6 +162,7 @@ def analyze_query_metrics(
                     "Check join keys and GROUP BY columns. Consider pre-aggregating data, "
                     "using broadcast joins for small tables, or clustering on join keys."
                 ),
+                impact=7,
             ))
 
     # Waiting at capacity
@@ -181,6 +185,7 @@ def analyze_query_metrics(
                     "Scale up the warehouse (more clusters or larger cluster size) "
                     "or schedule heavy queries during off-peak hours."
                 ),
+                impact=6,
             ))
 
     # High compilation time
@@ -205,6 +210,7 @@ def analyze_query_metrics(
                     "Simplify the query, break it into CTEs or temporary views, "
                     "or ensure table statistics are up to date (ANALYZE TABLE)."
                 ),
+                impact=3,
             ))
 
     # Extreme rows-read-to-rows-produced ratio
@@ -230,6 +236,7 @@ def analyze_query_metrics(
                     "can eliminate files before scanning. Check that predicate pushdown "
                     "is working (avoid wrapping filter columns in functions)."
                 ),
+                impact=7,
             ))
 
     # High result fetch time
@@ -254,6 +261,7 @@ def analyze_query_metrics(
                     "Add a LIMIT clause, project fewer columns, or aggregate results "
                     "server-side to reduce the volume of data transferred."
                 ),
+                impact=4,
             ))
 
     # Low parallelism efficiency
@@ -280,6 +288,7 @@ def analyze_query_metrics(
                     "bottleneck. Check data distribution and consider a smaller warehouse "
                     "for cost savings, or repartition the data."
                 ),
+                impact=3,
             ))
 
     # B9: Result caching not leveraged
@@ -303,6 +312,7 @@ def analyze_query_metrics(
                 "Avoid non-deterministic functions (CURRENT_TIMESTAMP, RAND) that "
                 "prevent cache hits."
             ),
+            impact=2,
         ))
 
     return recs

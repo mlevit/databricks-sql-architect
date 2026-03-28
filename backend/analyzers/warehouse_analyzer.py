@@ -29,6 +29,7 @@ def analyze_warehouse(warehouse_id: str) -> WarehouseInfo:
                 "especially scans, joins, and aggregations."
             ),
             action="Enable Photon on the warehouse configuration.",
+            impact=7,
         ))
 
     # Classic warehouse type
@@ -43,6 +44,7 @@ def analyze_warehouse(warehouse_id: str) -> WarehouseInfo:
                 "offer faster startup, better scaling, and additional optimizations."
             ),
             action="Consider migrating to a Serverless or Pro SQL warehouse.",
+            impact=4,
         ))
 
     # Single cluster
@@ -60,6 +62,7 @@ def analyze_warehouse(warehouse_id: str) -> WarehouseInfo:
                 "If you experience queuing (high waiting_at_capacity), "
                 "increase the max number of clusters for auto-scaling."
             ),
+            impact=3,
         ))
 
     # W4: Workload isolation
@@ -80,6 +83,7 @@ def analyze_warehouse(warehouse_id: str) -> WarehouseInfo:
                 "for scheduled ETL. Serverless warehouses auto-scale and provide "
                 "built-in isolation."
             ),
+            impact=2,
         ))
 
     return WarehouseInfo(

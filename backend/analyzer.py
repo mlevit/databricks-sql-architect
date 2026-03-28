@@ -47,6 +47,29 @@ def _noop_progress(_step: int, _label: str, _status: str) -> None:
     pass
 
 
+_PLAN_WARNING_IMPACTS: list[tuple[str, int]] = [
+    ("Cartesian product", 9),
+    ("nested loop join", 9),
+    ("Large fact-to-fact join", 8),
+    ("Broadcast join with large table", 7),
+    ("Full scan without filter pushdown", 7),
+    ("SortMergeJoin", 6),
+    ("without partition pruning", 6),
+    ("exchange operations", 5),
+    ("Data skew", 5),
+    ("sort operations", 4),
+]
+
+
+def _plan_warning_impact(description: str) -> int:
+    """Assign impact score to a plan warning based on known patterns."""
+    desc_lower = description.lower()
+    for pattern, impact in _PLAN_WARNING_IMPACTS:
+        if pattern.lower() in desc_lower:
+            return impact
+    return 5
+
+
 def run_analysis(
     statement_id: str,
     on_progress: ProgressCallback | None = None,
@@ -94,6 +117,7 @@ def run_analysis(
                 category=Category.EXECUTION,
                 title="Execution plan warning",
                 description=w,
+                impact=_plan_warning_impact(w),
             ))
     progress(4, STEPS[4], "done")
 
@@ -110,7 +134,7 @@ def run_analysis(
     _cross_correlate(metrics, parsed, tables, plan_summary, all_recs)
 
     severity_order = {Severity.CRITICAL: 0, Severity.WARNING: 1, Severity.INFO: 2}
-    all_recs.sort(key=lambda r: severity_order.get(r.severity, 99))
+    all_recs.sort(key=lambda r: (-r.impact, severity_order.get(r.severity, 99)))
     progress(6, STEPS[6], "done")
 
     return AnalysisResult(
@@ -157,6 +181,7 @@ def _cross_correlate(
                 "/*+ BROADCAST(small_table) */. Alternatively, pre-filter data "
                 "before the join to reduce the volume, or use a larger warehouse."
             ),
+            impact=9,
         ))
 
     # E2: Poor pruning + unclustered table → consolidated recommendation
@@ -192,6 +217,7 @@ def _cross_correlate(
                 f"{table_list}. This combination means every query must scan all files."
             ),
             action=f"Priority fix — add clustering and optimize:\n{cluster_lines}",
+            impact=10,
         ))
 
     # E3: High shuffle + join columns not clustered
@@ -227,6 +253,7 @@ def _cross_correlate(
                         for t in tables_needing_clustering
                     )
                 ),
+                impact=8,
             ))
 
     # E4: Missing join filters — plan shows no pushdown + SQL has joins
@@ -251,6 +278,7 @@ def _cross_correlate(
                 "the table they filter. Ensure filter columns are not wrapped in "
                 "functions that prevent pushdown."
             ),
+            impact=8,
         ))
 
     # E5: Window PARTITION BY column not in table clustering
@@ -278,6 +306,7 @@ def _cross_correlate(
                         f"column(s) in the clustering key:\n"
                         f"ALTER TABLE {t.full_name} CLUSTER BY ({win_cols_str});"
                     ),
+                    impact=4,
                 ))
                 break
 
@@ -372,6 +401,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "volume, and network transfer."
             ),
             action="List only the columns you need explicitly.",
+            impact=3,
         ))
 
     if parsed.has_cross_join:
@@ -385,6 +415,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
             ),
             action="Replace with an INNER/LEFT JOIN with an appropriate ON clause.",
             snippet=_first_snippet(parsed, "has_cross_join"),
+            impact=10,
         ))
 
     if parsed.missing_where and not parsed.has_limit:
@@ -397,6 +428,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "This will scan the entire table."
             ),
             action="Add a WHERE clause to filter data or a LIMIT to restrict rows.",
+            impact=5,
         ))
 
     if parsed.has_order_by_in_subquery:
@@ -409,6 +441,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "the outer query does not guarantee row order from subqueries."
             ),
             action="Remove the ORDER BY from the subquery unless it is paired with LIMIT.",
+            impact=2,
         ))
 
     if parsed.has_function_on_filter_column:
@@ -426,6 +459,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "E.g. replace YEAR(dt) = 2024 with dt >= '2024-01-01' AND dt < '2025-01-01'."
             ),
             snippet=_first_snippet(parsed, "has_function_on_filter_column"),
+            impact=7,
         ))
 
     if parsed.has_function_on_join_key:
@@ -440,6 +474,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
             ),
             action="Pre-compute the function result in a CTE or a generated column.",
             snippet=_first_snippet(parsed, "has_function_on_join_key"),
+            impact=6,
         ))
 
     # --- New pattern recommendations ---
@@ -460,6 +495,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "replace UNION with UNION ALL to avoid the extra sort pass."
             ),
             snippet=_first_snippet(parsed, "has_union_without_all"),
+            impact=5,
         ))
 
     if parsed.has_not_in_subquery:
@@ -477,6 +513,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "  WHERE NOT EXISTS (SELECT 1 FROM t2 WHERE t2.id = t1.id)"
             ),
             snippet=_first_snippet(parsed, "has_not_in_subquery"),
+            impact=5,
         ))
 
     if parsed.has_leading_wildcard_like:
@@ -495,6 +532,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "the string for suffix matching."
             ),
             snippet=_first_snippet(parsed, "has_leading_wildcard_like"),
+            impact=6,
         ))
 
     if parsed.has_distinct:
@@ -510,6 +548,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "Consider whether GROUP BY achieves the same result more efficiently, "
                 "or if an EXISTS subquery can replace the DISTINCT."
             ),
+            impact=3,
         ))
 
     if parsed.has_correlated_subquery:
@@ -528,6 +567,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "and aggregate."
             ),
             snippet=_first_snippet(parsed, "has_correlated_subquery"),
+            impact=8,
         ))
 
     if parsed.has_unpartitioned_window:
@@ -546,6 +586,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "consider pre-aggregating the data first."
             ),
             snippet=_first_snippet(parsed, "has_unpartitioned_window"),
+            impact=7,
         ))
 
     if parsed.large_in_list_count > 0:
@@ -563,6 +604,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "  WITH ids AS (SELECT * FROM VALUES (1), (2), ...) "
                 "SELECT ... FROM main_table JOIN ids ON ..."
             ),
+            impact=3,
         ))
 
     if parsed.has_count_distinct:
@@ -580,6 +622,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "which is significantly faster on Databricks (HyperLogLog-based, ~2% error)."
             ),
             snippet=_first_snippet(parsed, "has_count_distinct"),
+            impact=3,
         ))
 
     if parsed.has_complex_or_filter:
@@ -597,6 +640,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "If on different columns, consider splitting into UNION ALL of "
                 "simpler queries, each with a single filter condition."
             ),
+            impact=4,
         ))
 
     if parsed.has_scalar_subquery_in_select:
@@ -619,6 +663,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "ON c.id = o.cid"
             ),
             snippet=_first_snippet(parsed, "has_scalar_subquery_in_select"),
+            impact=8,
         ))
 
     if parsed.has_distinct_with_joins:
@@ -638,6 +683,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "pre-aggregate the many-side before joining, or use a semi-join "
                 "(EXISTS / IN) if you only need existence checks."
             ),
+            impact=6,
         ))
 
     if parsed.repeated_union_all_tables:
@@ -659,6 +705,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "    COUNT(CASE WHEN status = 'B' THEN 1 END) AS count_b\n"
                 "  FROM table_name"
             ),
+            impact=6,
         ))
 
     if parsed.max_nesting_depth >= DEEP_NESTING_THRESHOLD:
@@ -678,6 +725,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "Also verify that views referenced in the query aren't adding "
                 "hidden layers of nesting."
             ),
+            impact=4,
         ))
 
     if parsed.has_implicit_cast_in_predicate:
@@ -697,6 +745,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "the schema so casts are unnecessary."
             ),
             snippet=_first_snippet(parsed, "has_implicit_cast_in_predicate"),
+            impact=7,
         ))
 
     if parsed.has_or_different_columns:
@@ -719,6 +768,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "  SELECT ... WHERE col_b = 2"
             ),
             snippet=_first_snippet(parsed, "has_or_different_columns"),
+            impact=5,
         ))
 
     if parsed.has_missing_join_predicate:
@@ -733,6 +783,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
             ),
             action="Add an ON clause with the correct join key columns.",
             snippet=_first_snippet(parsed, "has_missing_join_predicate"),
+            impact=10,
         ))
 
     if parsed.has_order_by_without_limit:
@@ -751,6 +802,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "or downstream process can handle ordering instead."
             ),
             snippet=_first_snippet(parsed, "has_order_by_without_limit"),
+            impact=4,
         ))
 
     if parsed.group_by_column_count >= HIGH_GROUP_BY_COLUMNS:
@@ -769,6 +821,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "grouping on fewer high-level dimensions and using window functions "
                 "for detail-level calculations."
             ),
+            impact=3,
         ))
 
     # --- A19–A25: New Databricks-tuned recommendations ---
@@ -790,6 +843,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "reducing shuffle volume and memory usage."
             ),
             snippet=_first_snippet(parsed, "has_having_without_agg"),
+            impact=4,
         ))
 
     if parsed.has_deep_pagination_offset:
@@ -810,6 +864,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "paginate over it."
             ),
             snippet=_first_snippet(parsed, "has_deep_pagination_offset"),
+            impact=5,
         ))
 
     if parsed.has_exact_percentile:
@@ -827,6 +882,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "t-digest algorithm and is significantly faster on Databricks."
             ),
             snippet=_first_snippet(parsed, "has_exact_percentile"),
+            impact=3,
         ))
 
     if parsed.has_non_equi_join:
@@ -847,6 +903,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "pre-bucketing one side of the join to convert the range into equality."
             ),
             snippet=_first_snippet(parsed, "has_non_equi_join"),
+            impact=7,
         ))
 
     if parsed.has_count_star_for_existence:
@@ -864,6 +921,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "EXISTS (SELECT 1 FROM table WHERE ...) in a subquery."
             ),
             snippet=_first_snippet(parsed, "has_count_star_for_existence"),
+            impact=4,
         ))
 
     if parsed.has_possible_udf:
@@ -884,6 +942,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "performance, or use Pandas UDFs (vectorized UDFs) for batch processing."
             ),
             snippet=_first_snippet(parsed, "has_possible_udf"),
+            impact=6,
         ))
 
     if parsed.has_string_json_parsing:
@@ -907,6 +966,7 @@ def _sql_pattern_recommendations(parsed: ParsedQuery) -> list[Recommendation]:
                 "PARSE_JSON(json_col):customer.name"
             ),
             snippet=_first_snippet(parsed, "has_string_json_parsing"),
+            impact=6,
         ))
 
     return recs
