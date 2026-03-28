@@ -1,9 +1,35 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { rewriteQuery } from "../api";
 import type { AIRewriteResult } from "../types";
 
 interface Props {
   statementId: string;
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [text]);
+
+  return (
+    <button className="copy-btn" onClick={handleCopy} title="Copy to clipboard">
+      {copied ? (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M3 8.5L6.5 12L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+          <path d="M3 11V3.5C3 2.67 3.67 2 4.5 2H10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      )}
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
 }
 
 function formatExplanation(text: string) {
@@ -89,20 +115,26 @@ export default function AIRewrite({ statementId }: Props) {
 
       {result && (
         <div className="ai-rewrite__result">
-          <div className="ai-rewrite__columns">
-            <div className="ai-rewrite__col">
-              <h3>Original</h3>
-              <pre><code>{result.original_sql}</code></pre>
-            </div>
-            <div className="ai-rewrite__col">
-              <h3>Suggested</h3>
-              <pre><code>{result.suggested_sql}</code></pre>
-            </div>
-          </div>
           <div className="ai-rewrite__explanation">
             <h3>Explanation</h3>
             <div className="ai-rewrite__explanation-body">
               {formatExplanation(result.explanation)}
+            </div>
+          </div>
+          <div className="ai-rewrite__columns">
+            <div className="ai-rewrite__col">
+              <h3>Original</h3>
+              <div className="ai-rewrite__code-wrap">
+                <CopyButton text={result.original_sql} />
+                <pre><code>{result.original_sql}</code></pre>
+              </div>
+            </div>
+            <div className="ai-rewrite__col">
+              <h3>Suggested</h3>
+              <div className="ai-rewrite__code-wrap">
+                <CopyButton text={result.suggested_sql} />
+                <pre><code>{result.suggested_sql}</code></pre>
+              </div>
             </div>
           </div>
           <button className="ai-rewrite__btn" onClick={handleRewrite} disabled={loading}>

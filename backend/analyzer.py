@@ -224,7 +224,7 @@ def _sql_pattern_recommendations(parsed: Any) -> list[Recommendation]:
 
     if parsed.has_function_on_filter_column:
         recs.append(Recommendation(
-            severity=Severity.INFO,
+            severity=Severity.WARNING,
             category=Category.QUERY,
             title="Function applied to filter column",
             description=(

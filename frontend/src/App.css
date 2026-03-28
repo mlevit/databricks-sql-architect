@@ -633,16 +633,48 @@
   margin: 0 0 0.5rem;
 }
 
+.ai-rewrite__code-wrap {
+  position: relative;
+}
+
+.ai-rewrite__code-wrap .copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+}
+
 .ai-rewrite__col pre {
   background: #1e293b;
   color: #e2e8f0;
   border-radius: 8px;
   padding: 1rem;
+  padding-top: 2.2rem;
   font-size: 0.82rem;
   line-height: 1.5;
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #475569;
+  border-radius: 5px;
+  background: #334155;
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.copy-btn:hover {
+  background: #475569;
+  color: #f1f5f9;
 }
 
 .ai-rewrite__explanation {
