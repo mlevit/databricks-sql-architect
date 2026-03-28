@@ -84,3 +84,34 @@ export interface AIRewriteResult {
   syntax_valid: boolean;
   syntax_errors: string[];
 }
+
+export interface QueryExecutionMetrics {
+  total_duration_ms: number | null;
+  compilation_duration_ms: number | null;
+  execution_duration_ms: number | null;
+  result_fetch_duration_ms: number | null;
+  total_task_duration_ms: number | null;
+  read_bytes: number | null;
+  read_rows: number | null;
+  read_files: number | null;
+  read_partitions: number | null;
+  pruned_files: number | null;
+  produced_rows: number | null;
+  spilled_local_bytes: number | null;
+  shuffle_read_bytes: number | null;
+  from_result_cache: boolean | null;
+}
+
+export interface QueryBenchmarkStats {
+  elapsed_ms: number;
+  row_count: number | null;
+  byte_count: number | null;
+  status: string;
+  error: string | null;
+  metrics: QueryExecutionMetrics | null;
+}
+
+export interface BenchmarkResult {
+  original: QueryBenchmarkStats;
+  suggested: QueryBenchmarkStats;
+}

@@ -1,4 +1,4 @@
-import type { AIRewriteResult, AnalysisResult } from "./types";
+import type { AIRewriteResult, AnalysisResult, BenchmarkResult } from "./types";
 
 const BASE = "/api";
 
@@ -85,6 +85,22 @@ export async function analyzeQueryStream(
 export function rewriteQuery(statementId: string): Promise<AIRewriteResult> {
   return request<AIRewriteResult>(`${BASE}/rewrite/${encodeURIComponent(statementId)}`, {
     method: "POST",
+  });
+}
+
+export function benchmarkQueries(
+  originalSql: string,
+  suggestedSql: string,
+  warehouseId?: string,
+): Promise<BenchmarkResult> {
+  return request<BenchmarkResult>(`${BASE}/benchmark`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      original_sql: originalSql,
+      suggested_sql: suggestedSql,
+      warehouse_id: warehouseId ?? null,
+    }),
   });
 }
 

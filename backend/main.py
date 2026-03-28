@@ -10,10 +10,12 @@ from collections import OrderedDict
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from backend.analyzer import STEPS, run_analysis
 from backend.analyzers.ai_advisor import rewrite_query
-from backend.models import AIRewriteResult, AnalysisResult
+from backend.db import execute_sql_with_metrics
+from backend.models import AIRewriteResult, AnalysisResult, BenchmarkResult, QueryBenchmarkStats, QueryExecutionMetrics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -144,6 +146,42 @@ async def rewrite(statement_id: str):
     except Exception:
         logger.exception("AI rewrite failed for %s", statement_id)
         raise HTTPException(status_code=500, detail="AI rewrite failed") from None
+
+
+class BenchmarkRequest(BaseModel):
+    original_sql: str
+    suggested_sql: str
+    warehouse_id: str | None = None
+
+
+@app.post("/api/benchmark", response_model=BenchmarkResult)
+async def benchmark(req: BenchmarkRequest):
+    """Run both the original and suggested queries and return execution stats."""
+    wid = req.warehouse_id or None
+
+    try:
+        original_stats = execute_sql_with_metrics(req.original_sql, warehouse_id=wid)
+    except Exception:
+        logger.exception("Benchmark: original query execution failed")
+        raise HTTPException(status_code=500, detail="Failed to execute original query") from None
+
+    try:
+        suggested_stats = execute_sql_with_metrics(req.suggested_sql, warehouse_id=wid)
+    except Exception:
+        logger.exception("Benchmark: suggested query execution failed")
+        raise HTTPException(status_code=500, detail="Failed to execute suggested query") from None
+
+    def _to_benchmark_stats(raw: dict) -> QueryBenchmarkStats:
+        metrics_data = raw.pop("metrics", None)
+        stats = QueryBenchmarkStats(**raw)
+        if metrics_data:
+            stats.metrics = QueryExecutionMetrics(**metrics_data)
+        return stats
+
+    return BenchmarkResult(
+        original=_to_benchmark_stats(original_stats),
+        suggested=_to_benchmark_stats(suggested_stats),
+    )
 
 
 @app.get("/api/health")

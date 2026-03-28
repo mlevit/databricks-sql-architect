@@ -115,3 +115,34 @@ class AnalysisResult(BaseModel):
     plan_summary: Optional[PlanSummary] = None
     warehouse: Optional[WarehouseInfo] = None
     recommendations: list[Recommendation] = Field(default_factory=list)
+
+
+class QueryExecutionMetrics(BaseModel):
+    total_duration_ms: Optional[int] = None
+    compilation_duration_ms: Optional[int] = None
+    execution_duration_ms: Optional[int] = None
+    result_fetch_duration_ms: Optional[int] = None
+    total_task_duration_ms: Optional[int] = None
+    read_bytes: Optional[int] = None
+    read_rows: Optional[int] = None
+    read_files: Optional[int] = None
+    read_partitions: Optional[int] = None
+    pruned_files: Optional[int] = None
+    produced_rows: Optional[int] = None
+    spilled_local_bytes: Optional[int] = None
+    shuffle_read_bytes: Optional[int] = None
+    from_result_cache: Optional[bool] = None
+
+
+class QueryBenchmarkStats(BaseModel):
+    elapsed_ms: int
+    row_count: Optional[int] = None
+    byte_count: Optional[int] = None
+    status: str = "SUCCEEDED"
+    error: Optional[str] = None
+    metrics: Optional[QueryExecutionMetrics] = None
+
+
+class BenchmarkResult(BaseModel):
+    original: QueryBenchmarkStats
+    suggested: QueryBenchmarkStats
