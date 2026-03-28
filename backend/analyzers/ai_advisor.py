@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import sqlglot
 
@@ -36,13 +37,20 @@ def build_rewrite_prompt(analysis: AnalysisResult) -> str:
     parts.append(
         "\n## Instructions\n"
         "1. Rewrite the SQL query to address the issues above.\n"
-        "2. The rewritten query MUST be valid Databricks SQL syntax. Do not use "
+        "2. The rewritten query MUST be valid **Databricks SQL** syntax. Do not use "
         "syntax from other SQL dialects (e.g., PostgreSQL, MySQL, T-SQL).\n"
         "3. Only make changes that preserve the same result set.\n"
         "4. If no meaningful rewrite is possible, return the original query unchanged.\n"
         "5. Format your response as:\n"
         "OPTIMIZED SQL:\n```sql\n<your rewritten query>\n```\n"
         "EXPLANATION:\n<brief explanation of changes>\n"
+        "\n## Databricks SQL Syntax Reminders\n"
+        "- Column aliases in UNPIVOT / PIVOT must be backtick-quoted identifiers "
+        "(e.g., `Total Revenue`), NOT single-quoted string literals ('Total Revenue').\n"
+        "- Use backticks for identifiers containing spaces or special characters.\n"
+        "- Single quotes are only for string literal values, never for aliases or identifiers.\n"
+        "- LATERAL VIEW is not supported; use UNPIVOT or EXPLODE in a SELECT instead.\n"
+        "- Use TIMESTAMPADD / TIMESTAMPDIFF instead of DATEADD / DATEDIFF with non-standard syntax.\n"
     )
 
     return "\n".join(parts)
@@ -112,18 +120,63 @@ def _parse_ai_response(response: str, original_sql: str) -> tuple[str, str]:
 
 
 def _validate_sql(sql: str) -> tuple[bool, list[str]]:
-    """Parse the SQL with sqlglot's Databricks dialect and return (valid, errors)."""
+    """Parse the SQL with sqlglot's Databricks dialect, then run Databricks-specific lints."""
     if not sql or not sql.strip():
         return False, ["Empty SQL statement"]
+
+    errors: list[str] = []
+
     try:
         sqlglot.transpile(sql, read="databricks", error_level=sqlglot.ErrorLevel.RAISE)
-        return True, []
     except sqlglot.errors.ParseError as exc:
-        errors = [e.get("description", str(e)) if isinstance(e, dict) else str(e)
-                  for e in exc.errors] if exc.errors else [str(exc)]
-        return False, errors
+        errors.extend(
+            e.get("description", str(e)) if isinstance(e, dict) else str(e)
+            for e in exc.errors
+        ) if exc.errors else errors.append(str(exc))
     except Exception as exc:
-        return False, [str(exc)]
+        errors.append(str(exc))
+
+    errors.extend(_lint_databricks_sql(sql))
+
+    return (len(errors) == 0), errors
+
+
+# Matches UNPIVOT/PIVOT blocks, then looks for single-quoted aliases inside them.
+_PIVOT_UNPIVOT_RE = re.compile(
+    r"\b(UNPIVOT|PIVOT)\s*\(", re.IGNORECASE,
+)
+_SINGLE_QUOTED_ALIAS_RE = re.compile(
+    r"""(?:(?:AS|IN|FOR)\s*\()?\s*'([^']+)'""", re.IGNORECASE,
+)
+
+
+def _lint_databricks_sql(sql: str) -> list[str]:
+    """Catch Databricks-specific issues that sqlglot's parser does not enforce."""
+    warnings: list[str] = []
+
+    for pivot_match in _PIVOT_UNPIVOT_RE.finditer(sql):
+        start = pivot_match.start()
+        depth = 0
+        block_end = start
+        for i in range(pivot_match.end() - 1, len(sql)):
+            if sql[i] == "(":
+                depth += 1
+            elif sql[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    block_end = i + 1
+                    break
+        block = sql[start:block_end]
+        keyword = pivot_match.group(1).upper()
+
+        if _SINGLE_QUOTED_ALIAS_RE.search(block):
+            warnings.append(
+                f"Single-quoted string used as column alias in {keyword}. "
+                "Databricks SQL requires backtick-quoted identifiers for aliases "
+                "(e.g., `Total Revenue` instead of 'Total Revenue')."
+            )
+
+    return warnings
 
 
 def _human_bytes(b: int | None) -> str:

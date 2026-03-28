@@ -1,6 +1,6 @@
 """Tests for backend.analyzers.ai_advisor."""
 
-from backend.analyzers.ai_advisor import _parse_ai_response, _validate_sql
+from backend.analyzers.ai_advisor import _lint_databricks_sql, _parse_ai_response, _validate_sql
 
 
 class TestParseAIResponse:
@@ -122,3 +122,64 @@ class TestValidateSql:
         valid, errors = _validate_sql("   ")
         assert valid is False
         assert len(errors) > 0
+
+    def test_unpivot_single_quoted_alias_flagged(self):
+        sql = """
+        SELECT * FROM sales
+        UNPIVOT (
+            revenue FOR category IN (
+                q1_rev AS 'Q1 Revenue',
+                q2_rev AS 'Q2 Revenue'
+            )
+        )
+        """
+        valid, errors = _validate_sql(sql)
+        assert valid is False
+        assert any("UNPIVOT" in e for e in errors)
+
+    def test_unpivot_backtick_alias_ok(self):
+        sql = """
+        SELECT * FROM sales
+        UNPIVOT (
+            revenue FOR category IN (
+                q1_rev AS `Q1 Revenue`,
+                q2_rev AS `Q2 Revenue`
+            )
+        )
+        """
+        _valid, errors = _validate_sql(sql)
+        assert not any("UNPIVOT" in e for e in errors)
+
+    def test_pivot_single_quoted_alias_flagged(self):
+        sql = """
+        SELECT * FROM sales
+        PIVOT (
+            SUM(amount) FOR quarter IN (
+                'Q1' AS 'First Quarter',
+                'Q2' AS 'Second Quarter'
+            )
+        )
+        """
+        valid, errors = _validate_sql(sql)
+        assert valid is False
+        assert any("PIVOT" in e for e in errors)
+
+
+class TestLintDatabricksSql:
+    def test_no_pivot_unpivot(self):
+        assert _lint_databricks_sql("SELECT 1 FROM t") == []
+
+    def test_single_quote_in_unpivot(self):
+        sql = "UNPIVOT (val FOR name IN (a AS 'Label A', b AS 'Label B'))"
+        warnings = _lint_databricks_sql(sql)
+        assert len(warnings) == 1
+        assert "UNPIVOT" in warnings[0]
+
+    def test_backtick_in_unpivot(self):
+        sql = "UNPIVOT (val FOR name IN (a AS `Label A`, b AS `Label B`))"
+        warnings = _lint_databricks_sql(sql)
+        assert warnings == []
+
+    def test_string_value_in_where_not_flagged(self):
+        sql = "SELECT * FROM t WHERE name = 'hello'"
+        assert _lint_databricks_sql(sql) == []
