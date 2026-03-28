@@ -30,7 +30,9 @@ def get_warehouse_id() -> str:
     return wid
 
 
-def execute_sql(statement: str, *, warehouse_id: str | None = None) -> list[dict[str, Any]]:
+def execute_sql(
+    statement: str, *, warehouse_id: str | None = None
+) -> list[dict[str, Any]]:
     """Execute a SQL statement and return rows as list of dicts."""
     w = get_client()
     wid = warehouse_id or get_warehouse_id()
@@ -89,7 +91,12 @@ def execute_sql_with_metrics(
         while True:
             poll = w.statement_execution.get_statement(stmt_id)
             state = poll.status.state if poll.status else None
-            if state in (StatementState.SUCCEEDED, StatementState.FAILED, StatementState.CANCELED, StatementState.CLOSED):
+            if state in (
+                StatementState.SUCCEEDED,
+                StatementState.FAILED,
+                StatementState.CANCELED,
+                StatementState.CLOSED,
+            ):
                 response = poll
                 break
             _time.sleep(1)
@@ -107,7 +114,9 @@ def execute_sql_with_metrics(
 
     if response.status and response.status.state == StatementState.FAILED:
         result["status"] = "FAILED"
-        result["error"] = str(response.status.error) if response.status.error else "Unknown error"
+        result["error"] = (
+            str(response.status.error) if response.status.error else "Unknown error"
+        )
         return result
 
     if response.manifest:
@@ -122,7 +131,9 @@ def execute_sql_with_metrics(
     return result
 
 
-def _fetch_benchmark_metrics(statement_id: str, retries: int = 3) -> dict[str, Any] | None:
+def _fetch_benchmark_metrics(
+    statement_id: str, retries: int = 3
+) -> dict[str, Any] | None:
     """Fetch detailed execution metrics from Query History for a completed statement."""
     import time as _time
 
@@ -161,7 +172,11 @@ def _fetch_benchmark_metrics(statement_id: str, retries: int = 3) -> dict[str, A
                 "from_result_cache": m.result_from_cache,
             }
         except Exception:
-            logger.warning("Failed to fetch benchmark metrics for %s (attempt %d)", statement_id, attempt + 1)
+            logger.warning(
+                "Failed to fetch benchmark metrics for %s (attempt %d)",
+                statement_id,
+                attempt + 1,
+            )
 
     return None
 
@@ -225,6 +240,8 @@ def get_warehouse_config(warehouse_id: str) -> dict[str, Any]:
         "num_clusters": wh.num_clusters,
         "enable_photon": wh.enable_photon,
         "enable_serverless_compute": wh.enable_serverless_compute,
-        "spot_instance_policy": wh.spot_instance_policy.value if wh.spot_instance_policy else None,
+        "spot_instance_policy": (
+            wh.spot_instance_policy.value if wh.spot_instance_policy else None
+        ),
         "channel": wh.channel.name.value if wh.channel and wh.channel.name else None,
     }

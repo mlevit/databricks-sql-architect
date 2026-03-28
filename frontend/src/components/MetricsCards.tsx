@@ -54,14 +54,18 @@ export default function MetricsCards({ metrics }: Props) {
   ];
 
   return (
-    <div className="panel metrics-cards">
-      <h2>Execution Metrics</h2>
-      <div className="metrics-cards__grid">
+    <div className="bg-white rounded-lg border border-gray-200 p-5">
+      <h2 className="text-base font-semibold mb-3">Execution Metrics</h2>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3">
         {cards.map((c) => (
-          <div key={c.label} className="metric-card">
-            <div className="metric-card__label">{c.label}</div>
-            <div className="metric-card__value">{c.value}</div>
-            {c.sub && <div className="metric-card__sub">{c.sub}</div>}
+          <div key={c.label} className="bg-white border border-gray-200 rounded-lg p-3.5">
+            <div className="text-[0.7rem] uppercase tracking-wide text-gray-400 mb-0.5 font-medium">
+              {c.label}
+            </div>
+            <div className="text-xl font-semibold text-gray-900">{c.value}</div>
+            {c.sub && (
+              <div className="text-[0.72rem] text-gray-400 mt-0.5">{c.sub}</div>
+            )}
           </div>
         ))}
       </div>

@@ -215,12 +215,15 @@ def _analyze_single_table(
             description=(
                 f"Table {table_name} has no liquid clustering configured, "
                 f"but query filters on columns: {', '.join(clean_cols)}. "
-                "Without clustering, data skipping is ineffective."
+                "Without clustering, data skipping is ineffective. "
+                "A single query is not enough context to pick optimal clustering columns — "
+                "let Databricks decide based on overall workload patterns."
             ),
             action=(
-                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(clean_cols)});\n"
-                f"Alternatively, let Databricks choose automatically: "
-                f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
+                f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
+                f"Alternatively, if you are confident these columns represent "
+                f"your primary access pattern: "
+                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(clean_cols)});"
             ),
             impact=7,
         ))
@@ -403,10 +406,11 @@ def _check_large_unorganized(
     if filter_cols:
         cols_hint = ", ".join(sorted(filter_cols)[:4])
         action = (
-            f"ALTER TABLE {table_name} CLUSTER BY ({cols_hint});\n"
+            f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
             f"OPTIMIZE {table_name};\n"
-            f"Alternatively, let Databricks choose automatically: "
-            f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
+            f"Alternatively, if you are confident these columns represent "
+            f"your primary access pattern: "
+            f"ALTER TABLE {table_name} CLUSTER BY ({cols_hint});"
         )
     else:
         action = (

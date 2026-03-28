@@ -43,6 +43,36 @@ function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
+const CHIP_ACTIVE_SEVERITY: Record<string, string> = {
+  critical: "border-red-500 bg-red-50 text-red-700",
+  warning: "border-amber-500 bg-amber-50 text-amber-700",
+  info: "border-blue-500 bg-blue-50 text-blue-700",
+};
+
+const CHIP_ACTIVE_IMPACT: Record<string, string> = {
+  high: "border-red-500 bg-red-50 text-red-700",
+  medium: "border-amber-500 bg-amber-50 text-amber-700",
+  low: "border-blue-500 bg-blue-50 text-blue-700",
+};
+
+const REC_CARD_STYLES: Record<string, string> = {
+  critical: "bg-red-50 border-l-red-500",
+  warning: "bg-amber-50 border-l-amber-500",
+  info: "bg-blue-50 border-l-blue-600",
+};
+
+const BADGE_STYLES: Record<string, string> = {
+  critical: "bg-red-100 text-red-800",
+  warning: "bg-yellow-100 text-yellow-800",
+  info: "bg-blue-100 text-blue-800",
+};
+
+const IMPACT_COLOR: Record<string, string> = {
+  high: "text-red-600",
+  medium: "text-amber-500",
+  low: "text-blue-500",
+};
+
 export default function Recommendations({ recommendations }: Props) {
   const [severityFilter, setSeverityFilter] = useState<Set<Severity>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<Set<Category>>(new Set());
@@ -74,29 +104,35 @@ export default function Recommendations({ recommendations }: Props) {
 
   if (recommendations.length === 0) {
     return (
-      <div className="panel recommendations">
-        <h2>Recommendations</h2>
-        <p className="recommendations__empty">No issues detected. Your query looks good!</p>
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-base font-semibold mb-3">Recommendations</h2>
+        <p className="text-green-700 font-medium text-sm">No issues detected. Your query looks good!</p>
       </div>
     );
   }
 
   return (
-    <div className="panel recommendations">
-      <h2>
+    <div className="bg-white rounded-lg border border-gray-200 p-5">
+      <h2 className="text-base font-semibold mb-3">
         Recommendations{" "}
-        <span className="recommendations__count">
+        <span className="bg-red-600 text-white text-[0.68rem] font-semibold px-2 py-0.5 rounded-full align-middle">
           {hasActiveFilters ? `${filtered.length} / ${recommendations.length}` : recommendations.length}
         </span>
       </h2>
 
-      <div className="rec-filters">
-        <div className="rec-filters__group">
-          <span className="rec-filters__label">Severity</span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2.5 mb-1.5 border-b border-gray-200">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[0.7rem] font-semibold text-gray-400 uppercase tracking-wide mr-0.5">
+            Severity
+          </span>
           {SEVERITY_ORDER.filter((s) => presentSeverities.has(s)).map((s) => (
             <button
               key={s}
-              className={`rec-filters__chip rec-filters__chip--${s}${severityFilter.has(s) ? " rec-filters__chip--active" : ""}`}
+              className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border cursor-pointer capitalize transition-all ${
+                severityFilter.has(s)
+                  ? CHIP_ACTIVE_SEVERITY[s]
+                  : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:bg-gray-50"
+              }`}
               onClick={() => setSeverityFilter((prev) => toggleInSet(prev, s))}
             >
               {SEVERITY_ICONS[s]} {s}
@@ -104,14 +140,20 @@ export default function Recommendations({ recommendations }: Props) {
           ))}
         </div>
 
-        <div className="rec-filters__group">
-          <span className="rec-filters__label">Category</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[0.7rem] font-semibold text-gray-400 uppercase tracking-wide mr-0.5">
+            Category
+          </span>
           {(Object.keys(CATEGORY_LABELS) as Category[])
             .filter((c) => presentCategories.has(c))
             .map((c) => (
               <button
                 key={c}
-                className={`rec-filters__chip${categoryFilter.has(c) ? " rec-filters__chip--active" : ""}`}
+                className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border cursor-pointer transition-all ${
+                  categoryFilter.has(c)
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:bg-gray-50"
+                }`}
                 onClick={() => setCategoryFilter((prev) => toggleInSet(prev, c))}
               >
                 {CATEGORY_LABELS[c]}
@@ -119,14 +161,20 @@ export default function Recommendations({ recommendations }: Props) {
             ))}
         </div>
 
-        <div className="rec-filters__group">
-          <span className="rec-filters__label">Impact</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[0.7rem] font-semibold text-gray-400 uppercase tracking-wide mr-0.5">
+            Impact
+          </span>
           {(["high", "medium", "low"] as ImpactTier[])
             .filter((t) => presentImpactTiers.has(t))
             .map((t) => (
               <button
                 key={t}
-                className={`rec-filters__chip rec-filters__chip--impact-${t}${impactFilter.has(t) ? " rec-filters__chip--active" : ""}`}
+                className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border cursor-pointer transition-all ${
+                  impactFilter.has(t)
+                    ? CHIP_ACTIVE_IMPACT[t]
+                    : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:bg-gray-50"
+                }`}
                 onClick={() => setImpactFilter((prev) => toggleInSet(prev, t))}
               >
                 {IMPACT_TIER_LABELS[t]}
@@ -136,7 +184,7 @@ export default function Recommendations({ recommendations }: Props) {
 
         {hasActiveFilters && (
           <button
-            className="rec-filters__clear"
+            className="text-[0.7rem] font-medium text-blue-700 bg-transparent border-none cursor-pointer px-1.5 py-1 rounded hover:bg-blue-50 ml-auto"
             onClick={() => {
               setSeverityFilter(new Set());
               setCategoryFilter(new Set());
@@ -148,35 +196,54 @@ export default function Recommendations({ recommendations }: Props) {
         )}
       </div>
 
-      <div className="recommendations__list">
+      <div className="flex flex-col gap-2">
         {filtered.length === 0 ? (
-          <p className="recommendations__empty">No recommendations match the current filters.</p>
+          <p className="text-green-700 font-medium text-sm">No recommendations match the current filters.</p>
         ) : (
           filtered.map((r, i) => {
             const tier = impactTier(r.impact);
             return (
-              <div key={i} className={`rec rec--${r.severity}`}>
-                <div className="rec__header">
-                  <span className="rec__icon">{SEVERITY_ICONS[r.severity]}</span>
-                  <span className="rec__title">{r.title}</span>
-                  <span className={`badge badge--${r.severity}`}>{r.category}</span>
-                  <span className={`rec__impact rec__impact--${tier}`} title={`Impact: ${r.impact}/10`}>
-                    <span className="rec__impact-bar">
+              <div
+                key={i}
+                className={`p-3.5 rounded-lg border-l-[3px] ${REC_CARD_STYLES[r.severity] || "bg-gray-50 border-l-gray-300"}`}
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-sm">{SEVERITY_ICONS[r.severity]}</span>
+                  <span className="font-semibold text-sm">{r.title}</span>
+                  <span
+                    className={`text-xs font-medium px-2.5 py-0.5 rounded-full capitalize ${BADGE_STYLES[r.severity] || "bg-gray-100 text-gray-600"}`}
+                  >
+                    {CATEGORY_LABELS[r.category] ?? r.category}
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 ml-auto shrink-0 ${IMPACT_COLOR[tier]}`}
+                    title={`Impact: ${r.impact}/10`}
+                  >
+                    <span className="inline-flex gap-[1.5px] items-center">
                       {Array.from({ length: 10 }, (_, j) => (
-                        <span key={j} className={`rec__impact-pip${j < r.impact ? " rec__impact-pip--filled" : ""}`} />
+                        <span
+                          key={j}
+                          className={`inline-block w-1 h-2.5 rounded-sm ${j < r.impact ? "bg-current" : "bg-black/10"}`}
+                        />
                       ))}
                     </span>
-                    <span className="rec__impact-label">{IMPACT_TIER_LABELS[tier]}</span>
+                    <span className="text-[0.68rem] font-semibold uppercase tracking-tight">
+                      {IMPACT_TIER_LABELS[tier]}
+                    </span>
                   </span>
                 </div>
-                <p className="rec__desc">{r.description}</p>
+                <p className="text-[0.8rem] text-gray-500 mb-1 leading-relaxed">{r.description}</p>
                 {r.snippet && (
-                  <pre className="rec__snippet"><code>{r.snippet}</code></pre>
+                  <pre className="bg-black/5 border-l-[3px] border-gray-300 px-2.5 py-1.5 my-1 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words">
+                    <code className="font-mono text-gray-900">{r.snippet}</code>
+                  </pre>
                 )}
                 {r.action && (
-                  <div className="rec__action">
+                  <div className="text-[0.78rem] text-gray-900">
                     <strong>Suggested action:</strong>{" "}
-                    <code>{r.action}</code>
+                    <code className="bg-black/5 px-1.5 py-0.5 rounded text-xs break-words">
+                      {r.action}
+                    </code>
                   </div>
                 )}
               </div>

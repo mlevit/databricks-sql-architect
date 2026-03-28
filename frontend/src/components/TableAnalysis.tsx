@@ -9,9 +9,9 @@ interface Props {
 export default function TableAnalysis({ tables }: Props) {
   if (tables.length === 0) {
     return (
-      <div className="panel table-analysis">
-        <h2>Table Analysis</h2>
-        <p className="table-analysis__empty">
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h2 className="text-base font-semibold mb-3">Table Analysis</h2>
+        <p className="text-gray-400 text-sm">
           No table metadata available. The query may not reference any catalog tables,
           or DESCRIBE DETAIL was not able to retrieve information.
         </p>
@@ -20,9 +20,9 @@ export default function TableAnalysis({ tables }: Props) {
   }
 
   return (
-    <div className="panel table-analysis">
-      <h2>Table Analysis</h2>
-      <div className="table-analysis__list">
+    <div className="bg-white rounded-lg border border-gray-200 p-5">
+      <h2 className="text-base font-semibold mb-3">Table Analysis</h2>
+      <div className="flex flex-col gap-2">
         {tables.map((t) => (
           <TableCard key={t.full_name} table={t} />
         ))}
@@ -31,36 +31,61 @@ export default function TableAnalysis({ tables }: Props) {
   );
 }
 
+const SEVERITY_STYLES: Record<string, string> = {
+  critical: "bg-red-50 border-l-red-500",
+  warning: "bg-amber-50 border-l-amber-500",
+  info: "bg-blue-50 border-l-blue-600",
+};
+
 function TableCard({ table }: { table: TableInfo }) {
   const [expanded, setExpanded] = useState(false);
   const panelId = `table-detail-${table.full_name.replace(/[.\s]/g, "-")}`;
 
   return (
-    <div className="table-card">
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
       <button
-        className="table-card__header"
+        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 bg-gray-50 border-none cursor-pointer text-left text-sm hover:bg-gray-100 transition-colors"
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
         aria-controls={panelId}
       >
-        <span className="table-card__name">{table.full_name}</span>
-        <span className="table-card__meta">
-          {table.format && <span className="badge badge--neutral">{table.format}</span>}
+        <span className="font-semibold font-mono text-[0.8rem] shrink-0">
+          {table.full_name}
+        </span>
+        <span className="flex gap-2 items-center ml-auto text-xs text-gray-400">
+          {table.format && (
+            <span className="bg-gray-100 text-gray-500 text-xs font-medium px-2.5 py-0.5 rounded-full">
+              {table.format}
+            </span>
+          )}
           {table.num_files != null && <span>{table.num_files.toLocaleString()} files</span>}
           {table.size_in_bytes != null && <span>{humanBytes(table.size_in_bytes)}</span>}
         </span>
-        <span className={`table-card__chevron ${expanded ? "expanded" : ""}`}>&#9660;</span>
+        <svg
+          className={`w-3 h-3 text-gray-400 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 10 6"
+          aria-hidden="true"
+        >
+          <path
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            d="M1 1l4 4 4-4"
+          />
+        </svg>
       </button>
 
       {expanded && (
-        <div className="table-card__body" id={panelId}>
-          <div className="table-card__detail">
+        <div className="px-3.5 py-3 border-t border-gray-200 flex flex-col gap-1.5" id={panelId}>
+          <div className="text-[0.8rem]">
             <strong>Clustering:</strong>{" "}
             {table.clustering_columns.length > 0
               ? table.clustering_columns.join(", ")
               : "None"}
           </div>
-          <div className="table-card__detail">
+          <div className="text-[0.8rem]">
             <strong>Partitioning:</strong>{" "}
             {table.partition_columns.length > 0
               ? table.partition_columns.join(", ")
@@ -68,13 +93,18 @@ function TableCard({ table }: { table: TableInfo }) {
           </div>
 
           {table.recommendations.length > 0 && (
-            <div className="table-card__recs">
+            <div className="mt-1.5 flex flex-col gap-1.5">
               {table.recommendations.map((r, i) => (
-                <div key={i} className={`rec-inline rec-inline--${r.severity}`}>
-                  <span className="rec-inline__title">{r.title}</span>
-                  <span className="rec-inline__desc">{r.description}</span>
+                <div
+                  key={i}
+                  className={`p-2 rounded text-[0.78rem] flex flex-col gap-0.5 border-l-[3px] ${SEVERITY_STYLES[r.severity] || "bg-gray-50 border-l-gray-300"}`}
+                >
+                  <span className="font-semibold">{r.title}</span>
+                  <span className="text-gray-500">{r.description}</span>
                   {r.action && (
-                    <code className="rec-inline__action">{r.action}</code>
+                    <code className="mt-0.5 text-xs bg-black/5 px-1.5 py-0.5 rounded break-all">
+                      {r.action}
+                    </code>
                   )}
                 </div>
               ))}
