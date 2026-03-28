@@ -135,7 +135,11 @@ def _analyze_single_table(
                 f"but query filters on columns: {', '.join(clean_cols)}. "
                 "Without clustering, data skipping is ineffective."
             ),
-            action=f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(clean_cols)})",
+            action=(
+                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(clean_cols)});\n"
+                f"Alternatively, let Databricks choose automatically: "
+                f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
+            ),
         ))
 
     # Small file problem
@@ -182,6 +186,24 @@ def _analyze_single_table(
 
     # D4: Join columns not clustered
     _check_join_columns_not_clustered(table_name, clustering_lower, join_cols_lower, recs)
+
+    # D5: No clustering at all — suggest CLUSTER BY AUTO as baseline
+    if not clustering and not table_name.lower().startswith("system."):
+        already_has_clustering_rec = any(
+            "No clustering" in r.title or "Large unorganized" in r.title for r in recs
+        )
+        if not already_has_clustering_rec:
+            recs.append(Recommendation(
+                severity=Severity.INFO,
+                category=Category.TABLE,
+                title=f"No clustering on {table_name}",
+                description=(
+                    f"Table {table_name} has no liquid clustering. Enabling clustering "
+                    "improves data skipping, reduces scan volume, and speeds up queries — "
+                    "even when you are unsure which columns to cluster on."
+                ),
+                action=f"ALTER TABLE {table_name} CLUSTER BY AUTO;",
+            ))
 
     return recs
 
@@ -258,7 +280,19 @@ def _check_large_unorganized(
         return
 
     size_gb = size_bytes / (1024 ** 3)
-    cols_hint = ", ".join(sorted(filter_cols)[:4]) if filter_cols else "<frequently filtered columns>"
+    if filter_cols:
+        cols_hint = ", ".join(sorted(filter_cols)[:4])
+        action = (
+            f"ALTER TABLE {table_name} CLUSTER BY ({cols_hint});\n"
+            f"OPTIMIZE {table_name};\n"
+            f"Alternatively, let Databricks choose automatically: "
+            f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
+        )
+    else:
+        action = (
+            f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
+            f"OPTIMIZE {table_name};"
+        )
     recs.append(Recommendation(
         severity=Severity.WARNING,
         category=Category.TABLE,
@@ -267,10 +301,7 @@ def _check_large_unorganized(
             f"Table is {size_gb:,.1f} GB with no clustering or partitioning. "
             "Every query must scan through unordered data, making data skipping impossible."
         ),
-        action=(
-            f"ALTER TABLE {table_name} CLUSTER BY ({cols_hint});\n"
-            f"OPTIMIZE {table_name};"
-        ),
+        action=action,
     ))
 
 

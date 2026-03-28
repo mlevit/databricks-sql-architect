@@ -171,7 +171,17 @@ def _cross_correlate(
     if has_poor_pruning and unclustered_tables:
         table_list = ", ".join(unclustered_tables)
         filter_cols = sorted(set(parsed.filter_columns))[:4]
-        cols_str = ", ".join(filter_cols) if filter_cols else "<filter columns>"
+        if filter_cols:
+            cols_str = ", ".join(filter_cols)
+            cluster_lines = "\n".join(
+                f"ALTER TABLE {t} CLUSTER BY ({cols_str});\nOPTIMIZE {t};"
+                for t in unclustered_tables
+            )
+        else:
+            cluster_lines = "\n".join(
+                f"ALTER TABLE {t} CLUSTER BY AUTO;\nOPTIMIZE {t};"
+                for t in unclustered_tables
+            )
         recs.append(Recommendation(
             severity=Severity.CRITICAL,
             category=Category.EXECUTION,
@@ -180,13 +190,7 @@ def _cross_correlate(
                 f"File pruning is ineffective and the following tables have no clustering: "
                 f"{table_list}. This combination means every query must scan all files."
             ),
-            action=(
-                "Priority fix — add clustering and optimize:\n"
-                + "\n".join(
-                    f"ALTER TABLE {t} CLUSTER BY ({cols_str});\nOPTIMIZE {t};"
-                    for t in unclustered_tables
-                )
-            ),
+            action=f"Priority fix — add clustering and optimize:\n{cluster_lines}",
         ))
 
     # E3: High shuffle + join columns not clustered
