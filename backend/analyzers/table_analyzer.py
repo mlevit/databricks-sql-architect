@@ -51,6 +51,20 @@ _JSON_COLUMN_PATTERNS = re.compile(
 _SAFE_TABLE_NAME_RE = re.compile(r"^[\w][\w.]*$")
 
 
+def is_poor_clustering_candidate(col_name: str) -> bool:
+    """Return True if the column name suggests it would be a poor clustering key.
+
+    Continuous numeric measures (amount, price, revenue, …) and high-cardinality
+    unique identifiers (uuid, trace_id, …) make ineffective clustering keys
+    because their min/max ranges per file span nearly the entire value space,
+    rendering data-skipping useless.
+    """
+    return bool(
+        _NUMERIC_COLUMN_PATTERNS.search(col_name)
+        or _HIGH_CARDINALITY_KEY_PATTERNS.search(col_name)
+    )
+
+
 def _is_safe_table_name(name: str) -> bool:
     return bool(_SAFE_TABLE_NAME_RE.match(name)) and len(name) <= 256
 
@@ -208,6 +222,18 @@ def _analyze_single_table(
     unclustered_filter_cols = filter_cols_lower - clustering_lower - partition_lower
     if unclustered_filter_cols and not clustering:
         clean_cols = sorted(unclustered_filter_cols)
+        good_cols = [c for c in clean_cols if not is_poor_clustering_candidate(c)]
+
+        if good_cols:
+            action = (
+                f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
+                f"Alternatively, if you are confident these columns represent "
+                f"your primary access pattern: "
+                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(good_cols)});"
+            )
+        else:
+            action = f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
+
         recs.append(Recommendation(
             severity=Severity.WARNING,
             category=Category.TABLE,
@@ -219,12 +245,7 @@ def _analyze_single_table(
                 "A single query is not enough context to pick optimal clustering columns — "
                 "let Databricks decide based on overall workload patterns."
             ),
-            action=(
-                f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
-                f"Alternatively, if you are confident these columns represent "
-                f"your primary access pattern: "
-                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(clean_cols)});"
-            ),
+            action=action,
             impact=7,
         ))
 
@@ -403,8 +424,9 @@ def _check_large_unorganized(
         return
 
     size_gb = size_bytes / (1024 ** 3)
-    if filter_cols:
-        cols_hint = ", ".join(sorted(filter_cols)[:4])
+    good_cols = sorted(c for c in filter_cols if not is_poor_clustering_candidate(c))
+    if good_cols:
+        cols_hint = ", ".join(good_cols[:4])
         action = (
             f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
             f"OPTIMIZE {table_name};\n"

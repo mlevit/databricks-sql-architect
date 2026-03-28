@@ -15,6 +15,7 @@ from backend.analyzers.table_analyzer import (
     _check_under_partitioned,
     _check_vacuum_needed,
     _check_wide_table,
+    is_poor_clustering_candidate,
     LARGE_TABLE_THRESHOLD,
     WIDE_TABLE_COLUMN_THRESHOLD,
 )
@@ -224,6 +225,46 @@ class TestJsonStringColumns:
         recs: list[Recommendation] = []
         _check_json_string_columns("db.schema.users", cols, recs)
         assert recs == []
+
+
+class TestPoorClusteringCandidate:
+    """Measure columns and high-cardinality IDs should be rejected as clustering keys."""
+
+    def test_amount_rejected(self):
+        assert is_poor_clustering_candidate("amount") is True
+
+    def test_total_amount_rejected(self):
+        assert is_poor_clustering_candidate("total_amount") is True
+
+    def test_price_rejected(self):
+        assert is_poor_clustering_candidate("price") is True
+
+    def test_revenue_rejected(self):
+        assert is_poor_clustering_candidate("revenue") is True
+
+    def test_quantity_rejected(self):
+        assert is_poor_clustering_candidate("qty") is True
+
+    def test_uuid_rejected(self):
+        assert is_poor_clustering_candidate("uuid") is True
+
+    def test_request_id_rejected(self):
+        assert is_poor_clustering_candidate("request_id") is True
+
+    def test_date_column_accepted(self):
+        assert is_poor_clustering_candidate("rental_date") is False
+
+    def test_id_column_accepted(self):
+        assert is_poor_clustering_candidate("customer_id") is False
+
+    def test_status_column_accepted(self):
+        assert is_poor_clustering_candidate("status") is False
+
+    def test_region_column_accepted(self):
+        assert is_poor_clustering_candidate("region") is False
+
+    def test_generic_column_accepted(self):
+        assert is_poor_clustering_candidate("store_name") is False
 
 
 class TestHivePartitioning:

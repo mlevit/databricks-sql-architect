@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Any
 
+from backend.analyzers.table_analyzer import is_poor_clustering_candidate
 from backend.models import Category, QueryMetrics, Recommendation, Severity
 
 logger = logging.getLogger(__name__)
@@ -328,13 +329,19 @@ def _build_clustering_action(
             "used in WHERE predicates. Run OPTIMIZE on the table."
         )
 
-    # De-duplicate filter columns while preserving order
+    # De-duplicate filter columns while preserving order, excluding poor candidates
     seen: set[str] = set()
     unique_cols: list[str] = []
     for c in filter_columns:
-        if c.lower() not in seen:
+        if c.lower() not in seen and not is_poor_clustering_candidate(c):
             seen.add(c.lower())
             unique_cols.append(c)
+
+    if not unique_cols:
+        return (
+            "Add or adjust liquid clustering (CLUSTER BY) on the columns "
+            "used in WHERE predicates. Run OPTIMIZE on the table."
+        )
 
     # Databricks supports up to 4 clustering columns
     cluster_cols = unique_cols[:4]

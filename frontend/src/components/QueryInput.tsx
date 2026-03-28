@@ -20,7 +20,7 @@ export default function QueryInput({ onSubmit, loading, initialValue = "" }: Pro
   };
 
   return (
-    <form className="flex items-end gap-2 flex-1 min-w-0" onSubmit={handleSubmit}>
+    <form className="flex items-end gap-2 w-full max-w-md" onSubmit={handleSubmit}>
       <div className="flex flex-col gap-0.5 flex-1 min-w-0">
         <label
           htmlFor="statement-id"
