@@ -13,6 +13,10 @@ LOW_CACHE_PERCENT = 20
 HIGH_SHUFFLE_RATIO = 0.5
 CAPACITY_WAIT_RATIO = 0.25
 HIGH_COMPILATION_RATIO = 0.3
+READ_TO_PRODUCED_RATIO = 100
+READ_TO_PRODUCED_MIN_ROWS = 1_000_000
+HIGH_FETCH_RATIO = 0.3
+LOW_PARALLELISM = 2.0
 
 
 def build_query_metrics(row: dict[str, Any]) -> QueryMetrics:
@@ -200,6 +204,81 @@ def analyze_query_metrics(
                 action=(
                     "Simplify the query, break it into CTEs or temporary views, "
                     "or ensure table statistics are up to date (ANALYZE TABLE)."
+                ),
+            ))
+
+    # Extreme rows-read-to-rows-produced ratio
+    if (
+        metrics.read_rows
+        and metrics.produced_rows
+        and metrics.produced_rows > 0
+        and metrics.read_rows > READ_TO_PRODUCED_MIN_ROWS
+    ):
+        ratio = metrics.read_rows / metrics.produced_rows
+        if ratio > READ_TO_PRODUCED_RATIO:
+            recs.append(Recommendation(
+                severity=Severity.WARNING,
+                category=Category.EXECUTION,
+                title="Excessive rows scanned vs produced",
+                description=(
+                    f"Query scanned {metrics.read_rows:,} rows but only produced "
+                    f"{metrics.produced_rows:,} ({ratio:,.0f}x ratio). "
+                    "Filters are not effectively reducing the data early in the pipeline."
+                ),
+                action=(
+                    "Ensure tables are clustered on the filter columns so data skipping "
+                    "can eliminate files before scanning. Check that predicate pushdown "
+                    "is working (avoid wrapping filter columns in functions)."
+                ),
+            ))
+
+    # High result fetch time
+    if (
+        metrics.result_fetch_duration_ms
+        and metrics.total_duration_ms
+        and metrics.total_duration_ms > 0
+        and metrics.result_fetch_duration_ms > 2000
+    ):
+        fetch_ratio = metrics.result_fetch_duration_ms / metrics.total_duration_ms
+        if fetch_ratio > HIGH_FETCH_RATIO:
+            recs.append(Recommendation(
+                severity=Severity.WARNING,
+                category=Category.EXECUTION,
+                title="High result fetch time",
+                description=(
+                    f"Result fetching took {metrics.result_fetch_duration_ms:,} ms "
+                    f"({fetch_ratio:.0%} of total). The query is returning a large "
+                    "result set to the client."
+                ),
+                action=(
+                    "Add a LIMIT clause, project fewer columns, or aggregate results "
+                    "server-side to reduce the volume of data transferred."
+                ),
+            ))
+
+    # Low parallelism efficiency
+    if (
+        metrics.total_task_duration_ms
+        and metrics.execution_duration_ms
+        and metrics.execution_duration_ms > 5000
+    ):
+        parallelism = metrics.total_task_duration_ms / metrics.execution_duration_ms
+        if parallelism < LOW_PARALLELISM:
+            recs.append(Recommendation(
+                severity=Severity.INFO,
+                category=Category.EXECUTION,
+                title="Low parallelism efficiency",
+                description=(
+                    f"Effective parallelism is only {parallelism:.1f}x "
+                    f"(total task time {metrics.total_task_duration_ms:,} ms vs "
+                    f"wall clock {metrics.execution_duration_ms:,} ms). "
+                    "The query is not fully utilizing the warehouse's compute capacity."
+                ),
+                action=(
+                    "This may indicate data skew (one partition much larger than others), "
+                    "a dataset too small for the warehouse size, or a single-threaded "
+                    "bottleneck. Check data distribution and consider a smaller warehouse "
+                    "for cost savings, or repartition the data."
                 ),
             ))
 
