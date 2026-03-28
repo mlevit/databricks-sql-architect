@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { analyzeQueryStream } from "./api";
 import type { StepProgress } from "./api";
 import AIRewrite from "./components/AIRewrite";
@@ -25,20 +25,30 @@ const TABS = [
 
 type Tab = (typeof TABS)[number];
 
+function getInitialStatementId(): string {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("statement_id") || "";
+}
+
 export default function App() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("Overview");
-  const [statementId, setStatementId] = useState("");
+  const [statementId, setStatementId] = useState(getInitialStatementId);
   const [progress, setProgress] = useState<StepProgress | null>(null);
+  const autoTriggered = useRef(false);
 
-  const handleAnalyze = async (id: string) => {
+  const handleAnalyze = useCallback(async (id: string) => {
     setLoading(true);
     setError(null);
     setResult(null);
     setProgress(null);
     setStatementId(id);
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("statement_id", id);
+    window.history.replaceState(null, "", url.toString());
 
     await analyzeQueryStream(id, {
       onProgress: (p) => setProgress(p),
@@ -54,7 +64,16 @@ export default function App() {
         setProgress(null);
       },
     });
-  };
+  }, []);
+
+  useEffect(() => {
+    if (autoTriggered.current) return;
+    const initial = getInitialStatementId();
+    if (initial) {
+      autoTriggered.current = true;
+      handleAnalyze(initial);
+    }
+  }, [handleAnalyze]);
 
   const recCount = result?.recommendations.length ?? 0;
 
@@ -62,7 +81,11 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <h1>Databricks Query Analyzer</h1>
-        <QueryInput onSubmit={handleAnalyze} loading={loading} />
+        <QueryInput
+          onSubmit={handleAnalyze}
+          loading={loading}
+          initialValue={statementId}
+        />
       </header>
 
       {error && <div className="error-banner">{error}</div>}

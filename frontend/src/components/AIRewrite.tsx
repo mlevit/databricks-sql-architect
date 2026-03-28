@@ -6,6 +6,49 @@ interface Props {
   statementId: string;
 }
 
+function formatExplanation(text: string) {
+  const lines = text.split("\n").filter((l) => l.trim());
+
+  return lines.map((line, i) => {
+    const rendered = inlineBold(line.trim());
+
+    const numberedMatch = line.match(/^\s*(\d+)\.\s+(.*)/);
+    if (numberedMatch) {
+      return (
+        <div key={i} className="ai-rewrite__point">
+          <span className="ai-rewrite__point-num">{numberedMatch[1]}.</span>
+          <span>{inlineBold(numberedMatch[2])}</span>
+        </div>
+      );
+    }
+
+    const bulletMatch = line.match(/^\s*[-•]\s+(.*)/);
+    if (bulletMatch) {
+      return (
+        <div key={i} className="ai-rewrite__point">
+          <span className="ai-rewrite__point-num">&bull;</span>
+          <span>{inlineBold(bulletMatch[1])}</span>
+        </div>
+      );
+    }
+
+    return <p key={i}>{rendered}</p>;
+  });
+}
+
+function inlineBold(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={i}>{part.slice(1, -1)}</code>;
+    }
+    return part;
+  });
+}
+
 export default function AIRewrite({ statementId }: Props) {
   const [result, setResult] = useState<AIRewriteResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -58,7 +101,9 @@ export default function AIRewrite({ statementId }: Props) {
           </div>
           <div className="ai-rewrite__explanation">
             <h3>Explanation</h3>
-            <p>{result.explanation}</p>
+            <div className="ai-rewrite__explanation-body">
+              {formatExplanation(result.explanation)}
+            </div>
           </div>
           <button className="ai-rewrite__btn" onClick={handleRewrite} disabled={loading}>
             {loading ? "Regenerating..." : "Regenerate"}

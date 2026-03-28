@@ -118,6 +118,11 @@
   border-bottom: 2px solid #e2e8f0;
   margin-bottom: 1.25rem;
   overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tabs__btn {
@@ -644,10 +649,36 @@
   margin-bottom: 1rem;
 }
 
-.ai-rewrite__explanation p {
+.ai-rewrite__explanation-body {
   color: #475569;
   font-size: 0.88rem;
-  line-height: 1.6;
+  line-height: 1.7;
+}
+
+.ai-rewrite__explanation-body p {
+  margin: 0.4rem 0;
+}
+
+.ai-rewrite__explanation-body code {
+  background: #f1f5f9;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.82rem;
+  color: #1e293b;
+}
+
+.ai-rewrite__point {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.45rem 0;
+  align-items: baseline;
+}
+
+.ai-rewrite__point-num {
+  flex-shrink: 0;
+  font-weight: 700;
+  color: #3b82f6;
+  min-width: 1.2rem;
 }
 
 /* ---- Progress Stepper ---- */

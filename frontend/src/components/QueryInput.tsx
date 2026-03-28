@@ -1,12 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
   onSubmit: (statementId: string) => void;
   loading: boolean;
+  initialValue?: string;
 }
 
-export default function QueryInput({ onSubmit, loading }: Props) {
-  const [value, setValue] = useState("");
+export default function QueryInput({ onSubmit, loading, initialValue = "" }: Props) {
+  const [value, setValue] = useState(initialValue);
+
+  useEffect(() => {
+    if (initialValue) setValue(initialValue);
+  }, [initialValue]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
