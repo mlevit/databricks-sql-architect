@@ -98,7 +98,7 @@ class TestAnalyzeQueryMetrics:
 
     def test_poor_pruning(self):
         m = self._make_metrics(read_files=90, pruned_files=10)
-        recs = analyze_query_metrics(m, tables=["my_table"], filter_columns=["col1"])
+        recs = analyze_query_metrics(m, tables=["my_table"])
         titles = [r.title for r in recs]
         assert "Poor data skipping" in titles
 

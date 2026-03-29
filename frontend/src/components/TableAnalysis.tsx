@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { TableInfo } from "../types";
 import { humanBytes } from "../utils";
+import { RecommendationCard } from "./shared/recommendation";
 
 interface Props {
   tables: TableInfo[];
@@ -30,12 +31,6 @@ export default function TableAnalysis({ tables }: Props) {
     </div>
   );
 }
-
-const SEVERITY_STYLES: Record<string, string> = {
-  critical: "bg-red-50 border-l-red-500",
-  warning: "bg-amber-50 border-l-amber-500",
-  info: "bg-blue-50 border-l-blue-600",
-};
 
 function TableCard({ table }: { table: TableInfo }) {
   const [expanded, setExpanded] = useState(false);
@@ -93,20 +88,9 @@ function TableCard({ table }: { table: TableInfo }) {
           </div>
 
           {table.recommendations.length > 0 && (
-            <div className="mt-1.5 flex flex-col gap-1.5">
+            <div className="mt-1.5 flex flex-col gap-2">
               {table.recommendations.map((r, i) => (
-                <div
-                  key={i}
-                  className={`p-2 rounded text-[0.78rem] flex flex-col gap-0.5 border-l-[3px] ${SEVERITY_STYLES[r.severity] || "bg-gray-50 border-l-gray-300"}`}
-                >
-                  <span className="font-semibold">{r.title}</span>
-                  <span className="text-gray-500">{r.description}</span>
-                  {r.action && (
-                    <code className="mt-0.5 text-xs bg-black/5 px-1.5 py-0.5 rounded break-all">
-                      {r.action}
-                    </code>
-                  )}
-                </div>
+                <RecommendationCard key={i} recommendation={r} variant="compact" tableName={table.full_name} />
               ))}
             </div>
           )}

@@ -94,9 +94,7 @@ def run_analysis(
 
     # Step 3 — Analyze execution metrics
     progress(2, STEPS[2], "running")
-    metric_recs = analyze_query_metrics(
-        metrics, tables=parsed.tables, filter_columns=parsed.filter_columns,
-    )
+    metric_recs = analyze_query_metrics(metrics, tables=parsed.tables)
     all_recs.extend(metric_recs)
     progress(2, STEPS[2], "done")
 
@@ -129,9 +127,11 @@ def run_analysis(
         all_recs.extend(warehouse_info.recommendations)
     progress(5, STEPS[5], "done")
 
-    # Step 7 — Finalise recommendations (cross-correlations, then sort)
+    # Step 7 — Finalise recommendations (cross-correlations, group, then sort)
     progress(6, STEPS[6], "running")
     _cross_correlate(metrics, parsed, tables, plan_summary, all_recs)
+    all_recs = _deduplicate_clustering_recs(all_recs)
+    all_recs = _group_recommendations(all_recs)
 
     severity_order = {Severity.CRITICAL: 0, Severity.WARNING: 1, Severity.INFO: 2}
     all_recs.sort(key=lambda r: (-r.impact, severity_order.get(r.severity, 99)))
@@ -144,6 +144,70 @@ def run_analysis(
         warehouse=warehouse_info,
         recommendations=all_recs,
     )
+
+
+# ---------------------------------------------------------------------------
+# Deduplicate overlapping clustering recommendations
+# ---------------------------------------------------------------------------
+
+_CLUSTERING_REC_TITLES = {"No clustering configured", "Large unorganized table"}
+
+
+def _deduplicate_clustering_recs(recs: list[Recommendation]) -> list[Recommendation]:
+    """Drop 'Poor data skipping' when a table-level clustering rec already exists.
+
+    Both diagnose the same root cause (missing clustering) and suggest the same
+    fix.  The table-level recommendation is more specific, so keep that one.
+    """
+    has_clustering_rec = any(r.title in _CLUSTERING_REC_TITLES for r in recs)
+    if not has_clustering_rec:
+        return recs
+
+    return [r for r in recs if r.title != "Poor data skipping"]
+
+
+# ---------------------------------------------------------------------------
+# Recommendation grouping — merge per-table recs with the same title
+# ---------------------------------------------------------------------------
+
+def _group_recommendations(recs: list[Recommendation]) -> list[Recommendation]:
+    """Merge recommendations that share the same title, severity, and category.
+
+    Only recommendations with ``affected_tables`` populated are grouped; all
+    others pass through unchanged.
+    """
+    from collections import OrderedDict
+
+    grouped: OrderedDict[tuple, list[Recommendation]] = OrderedDict()
+    result: list[Recommendation] = []
+
+    for r in recs:
+        if r.affected_tables:
+            key = (r.title, r.severity, r.category)
+            grouped.setdefault(key, []).append(r)
+        else:
+            result.append(r)
+
+    for group in grouped.values():
+        if len(group) == 1:
+            result.append(group[0])
+        else:
+            all_tables = [t for r in group for t in r.affected_tables]
+            all_per_table = {t: a for r in group for t, a in r.per_table_actions.items()}
+            merged = Recommendation(
+                severity=group[0].severity,
+                category=group[0].category,
+                title=group[0].title,
+                description=group[0].description,
+                action=group[0].action,
+                snippet=group[0].snippet,
+                impact=max(r.impact for r in group),
+                affected_tables=all_tables,
+                per_table_actions=all_per_table,
+            )
+            result.append(merged)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -197,17 +261,13 @@ def _cross_correlate(
     if has_poor_pruning and unclustered_tables:
         table_list = ", ".join(unclustered_tables)
         filter_cols = sorted(set(parsed.filter_columns))[:4]
-        if filter_cols:
-            cols_str = ", ".join(filter_cols)
-            cluster_lines = "\n".join(
-                f"ALTER TABLE {t} CLUSTER BY ({cols_str});\nOPTIMIZE {t};"
-                for t in unclustered_tables
-            )
-        else:
-            cluster_lines = "\n".join(
-                f"ALTER TABLE {t} CLUSTER BY AUTO;\nOPTIMIZE {t};"
-                for t in unclustered_tables
-            )
+        per_table: dict[str, str] = {}
+        for t in unclustered_tables:
+            if filter_cols:
+                cols_str = ", ".join(filter_cols)
+                per_table[t] = f"ALTER TABLE {t} CLUSTER BY ({cols_str});\nOPTIMIZE {t};"
+            else:
+                per_table[t] = f"ALTER TABLE {t} CLUSTER BY AUTO;\nOPTIMIZE {t};"
         recs.append(Recommendation(
             severity=Severity.CRITICAL,
             category=Category.EXECUTION,
@@ -216,9 +276,22 @@ def _cross_correlate(
                 f"File pruning is ineffective and the following tables have no clustering: "
                 f"{table_list}. This combination means every query must scan all files."
             ),
-            action=f"Priority fix — add clustering and optimize:\n{cluster_lines}",
+            action="Priority fix — add clustering and optimize:",
+            affected_tables=unclustered_tables,
+            per_table_actions=per_table,
             impact=10,
         ))
+        unclustered_set = {t.lower() for t in unclustered_tables}
+        recs[:] = [
+            r for r in recs
+            if not (
+                r.title == "Poor data skipping"
+                or (
+                    r.title == "No clustering configured"
+                    and any(t.lower() in unclustered_set for t in r.affected_tables)
+                )
+            )
+        ]
 
     # E3: High shuffle + join columns not clustered
     has_high_shuffle = any(
@@ -295,17 +368,17 @@ def _cross_correlate(
                 recs.append(Recommendation(
                     severity=Severity.INFO,
                     category=Category.EXECUTION,
-                    title=f"Window PARTITION BY not aligned with clustering on {t.full_name}",
+                    title="Window PARTITION BY not aligned with clustering",
                     description=(
-                        f"Window functions partition by [{win_cols_str}] but "
-                        f"{t.full_name} is clustered on different columns. This forces "
-                        "a full redistribute and sort for the window operation."
+                        "Window functions partition by columns that are not covered by "
+                        "the table's clustering key. This forces a full redistribute "
+                        "and sort for the window operation."
                     ),
-                    action=(
-                        f"If this window pattern is common, include the partition "
-                        f"column(s) in the clustering key:\n"
-                        f"ALTER TABLE {t.full_name} CLUSTER BY ({win_cols_str});"
-                    ),
+                    action="If this window pattern is common, include the partition column(s) in the clustering key.",
+                    affected_tables=[t.full_name],
+                    per_table_actions={
+                        t.full_name: f"ALTER TABLE {t.full_name} CLUSTER BY ({win_cols_str});",
+                    },
                     impact=4,
                 ))
                 break

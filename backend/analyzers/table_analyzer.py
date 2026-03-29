@@ -48,6 +48,13 @@ _JSON_COLUMN_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+_SKEW_PRONE_PARTITION_PATTERNS = re.compile(
+    r"(country|region|state|city|status|type|category|channel|source|"
+    r"tenant_id|tenant|customer_id|customer|user_id|user|account_id|account|"
+    r"seller|vendor|merchant|partner|platform|device|browser|os$)",
+    re.IGNORECASE,
+)
+
 _SAFE_TABLE_NAME_RE = re.compile(r"^[\w][\w.]*$")
 
 
@@ -221,31 +228,20 @@ def _analyze_single_table(
     # No clustering on columns used in WHERE
     unclustered_filter_cols = filter_cols_lower - clustering_lower - partition_lower
     if unclustered_filter_cols and not clustering:
-        clean_cols = sorted(unclustered_filter_cols)
-        good_cols = [c for c in clean_cols if not is_poor_clustering_candidate(c)]
-
-        if good_cols:
-            action = (
-                f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
-                f"Alternatively, if you are confident these columns represent "
-                f"your primary access pattern: "
-                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(good_cols)});"
-            )
-        else:
-            action = f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
+        table_action = f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
 
         recs.append(Recommendation(
             severity=Severity.WARNING,
             category=Category.TABLE,
-            title=f"No clustering on {table_name}",
+            title="No clustering configured",
             description=(
-                f"Table {table_name} has no liquid clustering configured, "
-                f"but query filters on columns: {', '.join(clean_cols)}. "
-                "Without clustering, data skipping is ineffective. "
-                "A single query is not enough context to pick optimal clustering columns — "
-                "let Databricks decide based on overall workload patterns."
+                "Table has no liquid clustering configured, but the query filters on "
+                "columns that would benefit from it. Without clustering, data skipping "
+                "is ineffective. A single query is not enough context to pick optimal "
+                "clustering columns — let Databricks decide based on overall workload patterns."
             ),
-            action=action,
+            affected_tables=[table_name],
+            per_table_actions={table_name: table_action},
             impact=7,
         ))
 
@@ -253,16 +249,16 @@ def _analyze_single_table(
     if num_files and size_bytes and num_files > MANY_FILES_THRESHOLD:
         avg_file_size = size_bytes / num_files
         if avg_file_size < SMALL_FILE_THRESHOLD:
-            avg_mb = avg_file_size / (1024 * 1024)
             recs.append(Recommendation(
                 severity=Severity.WARNING,
                 category=Category.TABLE,
-                title=f"Small file problem on {table_name}",
+                title="Small file problem",
                 description=(
-                    f"Table has {num_files:,} files with average size {avg_mb:.1f} MB. "
-                    "Many small files cause excessive metadata overhead and slow scans."
+                    "Table has many small files causing excessive metadata overhead "
+                    "and slow scans. Run OPTIMIZE to compact them."
                 ),
-                action=f"OPTIMIZE {table_name}",
+                affected_tables=[table_name],
+                per_table_actions={table_name: f"OPTIMIZE {table_name};"},
                 impact=6,
             ))
 
@@ -271,16 +267,16 @@ def _analyze_single_table(
         recs.append(Recommendation(
             severity=Severity.INFO,
             category=Category.TABLE,
-            title=f"Partition columns not used in filters on {table_name}",
+            title="Partition columns not used in filters",
             description=(
-                f"Table is partitioned by [{', '.join(partitions)}] "
-                "but none of these columns appear in the query's WHERE clause. "
-                "Partition pruning cannot help this query."
+                "Table is partitioned but none of the partition columns appear in the "
+                "query's WHERE clause. Partition pruning cannot help this query."
             ),
             action=(
                 "Add a filter on the partition column if possible, "
                 "or consider re-partitioning the table based on your most common query patterns."
             ),
+            affected_tables=[table_name],
             impact=5,
         ))
 
@@ -305,13 +301,14 @@ def _analyze_single_table(
             recs.append(Recommendation(
                 severity=Severity.INFO,
                 category=Category.TABLE,
-                title=f"No clustering on {table_name}",
+                title="No clustering configured",
                 description=(
-                    f"Table {table_name} has no liquid clustering. Enabling clustering "
+                    "Table has no liquid clustering. Enabling clustering "
                     "improves data skipping, reduces scan volume, and speeds up queries — "
                     "even when you are unsure which columns to cluster on."
                 ),
-                action=f"ALTER TABLE {table_name} CLUSTER BY AUTO;",
+                affected_tables=[table_name],
+                per_table_actions={table_name: f"ALTER TABLE {table_name} CLUSTER BY AUTO;"},
                 impact=5,
             ))
 
@@ -367,13 +364,14 @@ def _check_stats_staleness(
         recs.append(Recommendation(
             severity=Severity.INFO,
             category=Category.TABLE,
-            title=f"Table statistics may be stale on {table_name}",
+            title="Table statistics may be stale",
             description=(
-                f"No row/size statistics found in table properties for {table_name}. "
+                "No row/size statistics found in table properties. "
                 "The query optimizer relies on accurate statistics for cost-based "
                 "decisions like join ordering and broadcast thresholds."
             ),
-            action=f"ANALYZE TABLE {table_name} COMPUTE STATISTICS FOR ALL COLUMNS",
+            affected_tables=[table_name],
+            per_table_actions={table_name: f"ANALYZE TABLE {table_name} COMPUTE STATISTICS FOR ALL COLUMNS;"},
             impact=4,
         ))
 
@@ -394,17 +392,19 @@ def _check_over_partitioned(
         recs.append(Recommendation(
             severity=Severity.WARNING,
             category=Category.TABLE,
-            title=f"Potentially over-partitioned: {table_name}",
+            title="Potentially over-partitioned",
             description=(
-                f"Table has {num_files:,} files across {', '.join(partitions)} partitions "
-                f"for {size_mb:,.0f} MB of data ({num_files / size_mb:.1f} files per MB). "
-                "High-cardinality partition columns create many tiny partitions."
+                "Table has a high file-to-data ratio suggesting over-partitioning. "
+                "High-cardinality partition columns create many tiny partitions. "
+                "Consider migrating to liquid clustering."
             ),
-            action=(
-                f"Consider migrating from partitioning to liquid clustering:\n"
-                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(partitions[:4])});\n"
-                f"OPTIMIZE {table_name};"
-            ),
+            affected_tables=[table_name],
+            per_table_actions={
+                table_name: (
+                    f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(partitions[:4])});\n"
+                    f"OPTIMIZE {table_name};"
+                ),
+            },
             impact=5,
         ))
 
@@ -423,31 +423,20 @@ def _check_large_unorganized(
     if not size_bytes or size_bytes < LARGE_TABLE_THRESHOLD:
         return
 
-    size_gb = size_bytes / (1024 ** 3)
-    good_cols = sorted(c for c in filter_cols if not is_poor_clustering_candidate(c))
-    if good_cols:
-        cols_hint = ", ".join(good_cols[:4])
-        action = (
-            f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
-            f"OPTIMIZE {table_name};\n"
-            f"Alternatively, if you are confident these columns represent "
-            f"your primary access pattern: "
-            f"ALTER TABLE {table_name} CLUSTER BY ({cols_hint});"
-        )
-    else:
-        action = (
-            f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
-            f"OPTIMIZE {table_name};"
-        )
+    table_action = (
+        f"ALTER TABLE {table_name} CLUSTER BY AUTO;\n"
+        f"OPTIMIZE {table_name};"
+    )
     recs.append(Recommendation(
         severity=Severity.WARNING,
         category=Category.TABLE,
-        title=f"Large unorganized table: {table_name}",
+        title="Large unorganized table",
         description=(
-            f"Table is {size_gb:,.1f} GB with no clustering or partitioning. "
+            "Table is large with no clustering or partitioning. "
             "Every query must scan through unordered data, making data skipping impossible."
         ),
-        action=action,
+        affected_tables=[table_name],
+        per_table_actions={table_name: table_action},
         impact=7,
     ))
 
@@ -468,16 +457,14 @@ def _check_join_columns_not_clustered(
         recs.append(Recommendation(
             severity=Severity.INFO,
             category=Category.TABLE,
-            title=f"Join columns not in clustering on {table_name}",
+            title="Join columns not in clustering",
             description=(
-                f"Query joins on columns [{cols}] but {table_name} is clustered "
-                f"on different columns. Clustering on join keys enables co-located "
-                "joins and reduces shuffle."
+                "Query joins on columns that are not covered by the table's clustering key. "
+                "Clustering on join keys enables co-located joins and reduces shuffle."
             ),
-            action=(
-                f"If this join pattern is common, consider including the join columns "
-                f"in the clustering key: ALTER TABLE {table_name} CLUSTER BY ({cols})"
-            ),
+            action="If this join pattern is common, consider including the join columns in the clustering key.",
+            affected_tables=[table_name],
+            per_table_actions={table_name: f"ALTER TABLE {table_name} CLUSTER BY ({cols});"},
             impact=6,
         ))
 
@@ -498,20 +485,21 @@ def _check_under_partitioned(
         return
     avg_partition_size = size_bytes / max(num_files, 1)
     if avg_partition_size > UNDER_PARTITIONED_SIZE_THRESHOLD:
-        size_tb = avg_partition_size / (1024 ** 4)
         recs.append(Recommendation(
             severity=Severity.INFO,
             category=Category.TABLE,
-            title=f"Under-partitioned table: {table_name}",
+            title="Under-partitioned table",
             description=(
-                f"Average partition size is ~{size_tb:.1f} TB, which is very large. "
-                "Partitions this big limit the benefit of partition pruning."
+                "Average partition size is very large, limiting the benefit of partition "
+                "pruning. Consider migrating to liquid clustering."
             ),
-            action=(
-                f"Migrate from Hive-style partitioning to liquid clustering:\n"
-                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(partitions[:4])});\n"
-                f"OPTIMIZE {table_name};"
-            ),
+            affected_tables=[table_name],
+            per_table_actions={
+                table_name: (
+                    f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(partitions[:4])});\n"
+                    f"OPTIMIZE {table_name};"
+                ),
+            },
             impact=5,
         ))
 
@@ -531,20 +519,20 @@ def _check_high_cardinality_clustering_key(
         return
     suspect = [c for c in clustering if _HIGH_CARDINALITY_KEY_PATTERNS.search(c)]
     if suspect:
-        cols = ", ".join(suspect)
         recs.append(Recommendation(
             severity=Severity.WARNING,
             category=Category.TABLE,
-            title=f"High-cardinality clustering key on {table_name}",
+            title="High-cardinality clustering key",
             description=(
-                f"Clustering column(s) [{cols}] appear to be unique identifiers. "
+                "Clustering column(s) appear to be unique identifiers. "
                 "Clustering on high-cardinality keys provides almost no scan reduction "
                 "because each file's min/max range spans the entire value space."
             ),
-            action=(
-                f"Re-cluster on columns commonly used in filters (dates, status, region):\n"
-                f"ALTER TABLE {table_name} CLUSTER BY AUTO;\nOPTIMIZE {table_name};"
-            ),
+            action="Re-cluster on columns commonly used in filters (dates, status, region).",
+            affected_tables=[table_name],
+            per_table_actions={
+                table_name: f"ALTER TABLE {table_name} CLUSTER BY AUTO;\nOPTIMIZE {table_name};",
+            },
             impact=5,
         ))
 
@@ -562,9 +550,9 @@ def _check_wide_table(
     recs.append(Recommendation(
         severity=Severity.INFO,
         category=Category.DATA_MODELING,
-        title=f"Wide table with {len(columns)} columns: {table_name}",
+        title="Wide table (many columns)",
         description=(
-            f"Table {table_name} has {len(columns)} columns. Even in columnar stores "
+            "Table has a very large number of columns. Even in columnar stores "
             "like Delta Lake, wide tables incur metadata overhead per column and "
             "increase schema evolution complexity. Queries touching only a few columns "
             "still pay a cost for schema parsing."
@@ -573,6 +561,7 @@ def _check_wide_table(
             "Consider splitting rarely-queried columns into a separate table "
             "joined by a shared key, or use SELECT with explicit column lists."
         ),
+        affected_tables=[table_name],
         impact=3,
     ))
 
@@ -592,17 +581,19 @@ def _check_non_delta_format(
     recs.append(Recommendation(
         severity=Severity.WARNING,
         category=Category.STORAGE,
-        title=f"Non-Delta format ({table_format}) on {table_name}",
+        title="Non-Delta format detected",
         description=(
-            f"Table {table_name} uses {table_format} format instead of Delta Lake. "
+            "Table uses a non-Delta format. "
             "Non-Delta tables miss out on ACID transactions, time travel, liquid "
             "clustering, Z-order, OPTIMIZE, VACUUM, and Photon-optimized reads."
         ),
-        action=(
-            f"Convert to Delta Lake:\n"
-            f"CREATE TABLE {table_name}_delta USING DELTA AS SELECT * FROM {table_name};\n"
-            "Or in-place: CONVERT TO DELTA (for Parquet tables)."
-        ),
+        affected_tables=[table_name],
+        per_table_actions={
+            table_name: (
+                f"CREATE TABLE {table_name}_delta USING DELTA AS SELECT * FROM {table_name};\n"
+                "Or in-place: CONVERT TO DELTA (for Parquet tables)."
+            ),
+        },
         impact=6,
     ))
 
@@ -627,17 +618,18 @@ def _check_vacuum_needed(
         recs.append(Recommendation(
             severity=Severity.INFO,
             category=Category.STORAGE,
-            title=f"No evidence of VACUUM on {table_name}",
+            title="No evidence of VACUUM",
             description=(
-                f"Table properties for {table_name} contain no vacuum timestamp. "
+                "Table properties contain no vacuum timestamp. "
                 "Without periodic VACUUM, deleted file markers and old data versions "
                 "accumulate, increasing metadata overhead and slowing reads."
             ),
             action=(
-                f"VACUUM {table_name};\n"
                 "Set up a recurring job to vacuum tables regularly. "
                 "Default retention is 7 days (168 hours)."
             ),
+            affected_tables=[table_name],
+            per_table_actions={table_name: f"VACUUM {table_name};"},
             impact=4,
         ))
 
@@ -662,38 +654,42 @@ def _check_inappropriate_data_types(
             bad_numbers.append(col.name)
 
     if bad_dates:
-        cols = ", ".join(bad_dates[:5])
         recs.append(Recommendation(
             severity=Severity.WARNING,
             category=Category.DATA_MODELING,
-            title=f"Date columns stored as STRING on {table_name}",
+            title="Date columns stored as STRING",
             description=(
-                f"Columns [{cols}] appear to hold date/time values but are typed as "
-                "STRING. This prevents partition pruning, data skipping via zone maps, "
+                "Columns that appear to hold date/time values are typed as STRING. "
+                "This prevents partition pruning, data skipping via zone maps, "
                 "and proper sort ordering. Compression is also significantly worse."
             ),
-            action=(
-                "ALTER TABLE " + table_name + " ALTER COLUMN <col> SET DATA TYPE "
-                "TIMESTAMP or DATE as appropriate."
-            ),
+            affected_tables=[table_name],
+            per_table_actions={
+                table_name: (
+                    f"ALTER TABLE {table_name} ALTER COLUMN <col> SET DATA TYPE "
+                    "TIMESTAMP or DATE as appropriate."
+                ),
+            },
             impact=3,
         ))
 
     if bad_numbers:
-        cols = ", ".join(bad_numbers[:5])
         recs.append(Recommendation(
             severity=Severity.WARNING,
             category=Category.DATA_MODELING,
-            title=f"Numeric columns stored as STRING on {table_name}",
+            title="Numeric columns stored as STRING",
             description=(
-                f"Columns [{cols}] appear to hold numeric values but are typed as "
-                "STRING. This prevents proper aggregation pushdown, zone-map-based "
+                "Columns that appear to hold numeric values are typed as STRING. "
+                "This prevents proper aggregation pushdown, zone-map-based "
                 "data skipping, and wastes storage due to poor compression."
             ),
-            action=(
-                "ALTER TABLE " + table_name + " ALTER COLUMN <col> SET DATA TYPE "
-                "DECIMAL, DOUBLE, or BIGINT as appropriate."
-            ),
+            affected_tables=[table_name],
+            per_table_actions={
+                table_name: (
+                    f"ALTER TABLE {table_name} ALTER COLUMN <col> SET DATA TYPE "
+                    "DECIMAL, DOUBLE, or BIGINT as appropriate."
+                ),
+            },
             impact=3,
         ))
 
@@ -711,13 +707,12 @@ def _check_string_enum_columns(
                and _ENUM_COLUMN_PATTERNS.search(c.name)]
     if not suspect:
         return
-    cols = ", ".join(suspect[:5])
     recs.append(Recommendation(
         severity=Severity.INFO,
         category=Category.DATA_MODELING,
-        title=f"Possible low-cardinality STRING columns on {table_name}",
+        title="Possible low-cardinality STRING columns",
         description=(
-            f"Columns [{cols}] appear to be categorical/enum values stored as STRING. "
+            "Columns that appear to be categorical/enum values are stored as STRING. "
             "Low-cardinality STRING columns compress poorly compared to TINYINT or "
             "SMALLINT codes and increase shuffle/join overhead."
         ),
@@ -725,6 +720,7 @@ def _check_string_enum_columns(
             "Consider mapping to integer codes with a lookup table, or accept the "
             "trade-off if readability is more important than compression."
         ),
+        affected_tables=[table_name],
         impact=2,
     ))
 
@@ -753,16 +749,18 @@ def _check_large_table_no_date_clustering(
     recs.append(Recommendation(
         severity=Severity.INFO,
         category=Category.TABLE,
-        title=f"Large table without date clustering: {table_name}",
+        title="Large table without date clustering",
         description=(
-            f"Table is {size_bytes / (1024 ** 3):,.1f} GB with no clustering. "
-            f"Column '{best_col}' appears to be a date/time dimension — clustering "
-            "on it would enable significant data skipping for time-range queries."
+            "Table is large with no clustering and has date/time columns that would "
+            "enable significant data skipping for time-range queries."
         ),
-        action=(
-            f"ALTER TABLE {table_name} CLUSTER BY ({best_col});\n"
-            f"OPTIMIZE {table_name};"
-        ),
+        affected_tables=[table_name],
+        per_table_actions={
+            table_name: (
+                f"ALTER TABLE {table_name} CLUSTER BY ({best_col});\n"
+                f"OPTIMIZE {table_name};"
+            ),
+        },
         impact=6,
     ))
 
@@ -787,21 +785,20 @@ def _check_json_string_columns(
     if not suspect:
         return
 
-    cols = ", ".join(suspect[:5])
     recs.append(Recommendation(
         severity=Severity.INFO,
         category=Category.DATA_MODELING,
-        title=f"STRING columns likely storing JSON on {table_name}",
+        title="STRING columns likely storing JSON",
         description=(
-            f"Columns [{cols}] appear to store JSON data as STRING. Querying these "
+            "Columns appear to store JSON data as STRING. Querying these "
             "with get_json_object or from_json parses JSON on every row, breaks "
             "Photon vectorized execution, and prevents data skipping on nested fields."
         ),
-        action=(
-            f"Migrate to VARIANT for native path access:\n"
-            f"ALTER TABLE {table_name} ALTER COLUMN <col> SET DATA TYPE VARIANT;\n"
-            "Then use col:path.to.field instead of get_json_object()."
-        ),
+        action="Migrate to VARIANT for native path access, then use col:path.to.field instead of get_json_object().",
+        affected_tables=[table_name],
+        per_table_actions={
+            table_name: f"ALTER TABLE {table_name} ALTER COLUMN <col> SET DATA TYPE VARIANT;",
+        },
         impact=5,
     ))
 
@@ -824,19 +821,22 @@ def _check_hive_partitioning(
     recs.append(Recommendation(
         severity=Severity.INFO,
         category=Category.TABLE,
-        title=f"Hive-style partitioning on {table_name} — consider liquid clustering",
+        title="Hive-style partitioning detected",
         description=(
-            f"Table uses Hive-style partitioning by [{part_cols}]. Liquid clustering "
+            "Table uses Hive-style partitioning. Liquid clustering "
             "provides superior performance: it enables data skipping on any clustered "
             "column, adapts to changing query patterns, avoids small-file problems, "
             "and can be changed without rewriting the table."
         ),
-        action=(
-            f"ALTER TABLE {table_name} CLUSTER BY ({part_cols});\n"
-            f"OPTIMIZE {table_name};\n"
-            "Or let Databricks choose optimal columns automatically:\n"
-            f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
-        ),
+        affected_tables=[table_name],
+        per_table_actions={
+            table_name: (
+                f"ALTER TABLE {table_name} CLUSTER BY ({part_cols});\n"
+                f"OPTIMIZE {table_name};\n"
+                "Or let Databricks choose optimal columns automatically:\n"
+                f"ALTER TABLE {table_name} CLUSTER BY AUTO;"
+            ),
+        },
         impact=6,
     ))
 

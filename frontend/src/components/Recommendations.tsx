@@ -1,40 +1,20 @@
 import { useMemo, useState } from "react";
-import type { Category, Recommendation, Severity } from "../types";
+import type { Category, Severity } from "../types";
+import {
+  type ImpactTier,
+  CATEGORY_LABELS,
+  IMPACT_TIER_LABELS,
+  SEVERITY_ICONS,
+  RecommendationCard,
+  impactTier,
+} from "./shared/recommendation";
+import type { Recommendation } from "../types";
 
 interface Props {
   recommendations: Recommendation[];
 }
 
-const SEVERITY_ICONS: Record<Severity, string> = {
-  critical: "\u26D4",
-  warning: "\u26A0\uFE0F",
-  info: "\u2139\uFE0F",
-};
-
 const SEVERITY_ORDER: Severity[] = ["critical", "warning", "info"];
-
-const CATEGORY_LABELS: Record<Category, string> = {
-  query: "Query",
-  execution: "Execution",
-  table: "Table",
-  warehouse: "Warehouse",
-  storage: "Storage",
-  data_modeling: "Data Modeling",
-};
-
-type ImpactTier = "high" | "medium" | "low";
-
-const IMPACT_TIER_LABELS: Record<ImpactTier, string> = {
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
-
-function impactTier(impact: number): ImpactTier {
-  if (impact >= 7) return "high";
-  if (impact >= 4) return "medium";
-  return "low";
-}
 
 function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
   const next = new Set(set);
@@ -53,24 +33,6 @@ const CHIP_ACTIVE_IMPACT: Record<string, string> = {
   high: "border-red-500 bg-red-50 text-red-700",
   medium: "border-amber-500 bg-amber-50 text-amber-700",
   low: "border-blue-500 bg-blue-50 text-blue-700",
-};
-
-const REC_CARD_STYLES: Record<string, string> = {
-  critical: "bg-red-50 border-l-red-500",
-  warning: "bg-amber-50 border-l-amber-500",
-  info: "bg-blue-50 border-l-blue-600",
-};
-
-const BADGE_STYLES: Record<string, string> = {
-  critical: "bg-red-100 text-red-800",
-  warning: "bg-yellow-100 text-yellow-800",
-  info: "bg-blue-100 text-blue-800",
-};
-
-const IMPACT_COLOR: Record<string, string> = {
-  high: "text-red-600",
-  medium: "text-amber-500",
-  low: "text-blue-500",
 };
 
 export default function Recommendations({ recommendations }: Props) {
@@ -200,55 +162,9 @@ export default function Recommendations({ recommendations }: Props) {
         {filtered.length === 0 ? (
           <p className="text-green-700 font-medium text-sm">No recommendations match the current filters.</p>
         ) : (
-          filtered.map((r, i) => {
-            const tier = impactTier(r.impact);
-            return (
-              <div
-                key={i}
-                className={`p-3.5 rounded-lg border-l-[3px] ${REC_CARD_STYLES[r.severity] || "bg-gray-50 border-l-gray-300"}`}
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-sm">{SEVERITY_ICONS[r.severity]}</span>
-                  <span className="font-semibold text-sm">{r.title}</span>
-                  <span
-                    className={`text-xs font-medium px-2.5 py-0.5 rounded-full capitalize ${BADGE_STYLES[r.severity] || "bg-gray-100 text-gray-600"}`}
-                  >
-                    {CATEGORY_LABELS[r.category] ?? r.category}
-                  </span>
-                  <span
-                    className={`inline-flex items-center gap-1 ml-auto shrink-0 ${IMPACT_COLOR[tier]}`}
-                    title={`Impact: ${r.impact}/10`}
-                  >
-                    <span className="inline-flex gap-[1.5px] items-center">
-                      {Array.from({ length: 10 }, (_, j) => (
-                        <span
-                          key={j}
-                          className={`inline-block w-1 h-2.5 rounded-sm ${j < r.impact ? "bg-current" : "bg-black/10"}`}
-                        />
-                      ))}
-                    </span>
-                    <span className="text-[0.68rem] font-semibold uppercase tracking-tight">
-                      {IMPACT_TIER_LABELS[tier]}
-                    </span>
-                  </span>
-                </div>
-                <p className="text-[0.8rem] text-gray-500 mb-1 leading-relaxed">{r.description}</p>
-                {r.snippet && (
-                  <pre className="bg-black/5 border-l-[3px] border-gray-300 px-2.5 py-1.5 my-1 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words">
-                    <code className="font-mono text-gray-900">{r.snippet}</code>
-                  </pre>
-                )}
-                {r.action && (
-                  <div className="text-[0.78rem] text-gray-900">
-                    <strong>Suggested action:</strong>{" "}
-                    <code className="bg-black/5 px-1.5 py-0.5 rounded text-xs break-words">
-                      {r.action}
-                    </code>
-                  </div>
-                )}
-              </div>
-            );
-          })
+          filtered.map((r, i) => (
+            <RecommendationCard key={i} recommendation={r} variant="full" />
+          ))
         )}
       </div>
     </div>

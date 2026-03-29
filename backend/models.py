@@ -34,6 +34,8 @@ class Recommendation(BaseModel):
         le=10,
         description="Estimated performance impact if addressed (1=minimal, 10=transformative)",
     )
+    affected_tables: list[str] = Field(default_factory=list)
+    per_table_actions: dict[str, str] = Field(default_factory=dict)
 
 
 class QueryMetrics(BaseModel):

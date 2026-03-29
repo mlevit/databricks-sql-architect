@@ -9,6 +9,8 @@ export interface Recommendation {
   action?: string;
   snippet?: string;
   impact: number;
+  affected_tables?: string[];
+  per_table_actions?: Record<string, string>;
 }
 
 export interface QueryMetrics {

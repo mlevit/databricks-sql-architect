@@ -1,14 +1,9 @@
 import type { WarehouseInfo as WarehouseInfoType } from "../types";
+import { RecommendationCard } from "./shared/recommendation";
 
 interface Props {
   warehouse: WarehouseInfoType;
 }
-
-const SEVERITY_STYLES: Record<string, string> = {
-  critical: "bg-red-50 border-l-red-500",
-  warning: "bg-amber-50 border-l-amber-500",
-  info: "bg-blue-50 border-l-blue-600",
-};
 
 export default function WarehouseInfo({ warehouse }: Props) {
   const photonValue =
@@ -43,15 +38,9 @@ export default function WarehouseInfo({ warehouse }: Props) {
       </div>
 
       {warehouse.recommendations.length > 0 && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           {warehouse.recommendations.map((r, i) => (
-            <div
-              key={i}
-              className={`p-2 rounded text-[0.78rem] flex flex-col gap-0.5 border-l-[3px] ${SEVERITY_STYLES[r.severity] || "bg-gray-50 border-l-gray-300"}`}
-            >
-              <span className="font-semibold">{r.title}</span>
-              <span className="text-gray-500">{r.description}</span>
-            </div>
+            <RecommendationCard key={i} recommendation={r} variant="compact" />
           ))}
         </div>
       )}

@@ -4,7 +4,6 @@ import json
 import logging
 from typing import Any
 
-from backend.analyzers.table_analyzer import is_poor_clustering_candidate
 from backend.models import Category, QueryMetrics, Recommendation, Severity
 
 logger = logging.getLogger(__name__)
@@ -73,7 +72,6 @@ def build_query_metrics(row: dict[str, Any]) -> QueryMetrics:
 def analyze_query_metrics(
     metrics: QueryMetrics,
     tables: list[str] | None = None,
-    filter_columns: list[str] | None = None,
 ) -> list[Recommendation]:
     recs: list[Recommendation] = []
 
@@ -106,7 +104,7 @@ def analyze_query_metrics(
         if total_files > 0:
             prune_ratio = metrics.pruned_files / total_files
             if prune_ratio < 0.3 and total_files > 10:
-                action = _build_clustering_action(tables, filter_columns)
+                action, per_table, affected = _build_clustering_action(tables)
                 recs.append(Recommendation(
                     severity=Severity.WARNING,
                     category=Category.EXECUTION,
@@ -117,6 +115,8 @@ def analyze_query_metrics(
                         "The query is scanning far more files than necessary."
                     ),
                     action=action,
+                    affected_tables=affected,
+                    per_table_actions=per_table,
                     impact=8,
                 ))
 
@@ -292,7 +292,37 @@ def analyze_query_metrics(
                 impact=3,
             ))
 
-    # B9: Result caching not leveraged
+    # B9: Data skew likely (combined signal)
+    if (
+        metrics.spilled_local_bytes
+        and metrics.spilled_local_bytes > SPILL_THRESHOLD_BYTES
+        and metrics.total_task_duration_ms
+        and metrics.execution_duration_ms
+        and metrics.execution_duration_ms > 5000
+    ):
+        parallelism = metrics.total_task_duration_ms / metrics.execution_duration_ms
+        if parallelism < LOW_PARALLELISM:
+            spill_mb = metrics.spilled_local_bytes / (1024 * 1024)
+            recs.append(Recommendation(
+                severity=Severity.WARNING,
+                category=Category.EXECUTION,
+                title="Data skew likely",
+                description=(
+                    f"Query spilled {spill_mb:,.0f} MB to disk with only "
+                    f"{parallelism:.1f}x effective parallelism. This pattern indicates "
+                    "a few tasks are processing disproportionately more data than "
+                    "others, causing some executors to spill while the rest sit idle."
+                ),
+                action=(
+                    "Identify the skewed key using the Spark UI task metrics. "
+                    "Common fixes: add a salting column to redistribute data, "
+                    "use a skew join hint (/*+ SKEW_JOIN */), pre-aggregate the "
+                    "dominant key values in a CTE, or filter them out and UNION back."
+                ),
+                impact=8,
+            ))
+
+    # B10: Result caching not leveraged
     if (
         metrics.from_result_cache is False
         and metrics.execution_duration_ms
@@ -321,42 +351,24 @@ def analyze_query_metrics(
 
 def _build_clustering_action(
     tables: list[str] | None,
-    filter_columns: list[str] | None,
-) -> str:
-    if not tables or not filter_columns:
-        return (
-            "Add or adjust liquid clustering (CLUSTER BY) on the columns "
-            "used in WHERE predicates. Run OPTIMIZE on the table."
-        )
-
-    # De-duplicate filter columns while preserving order, excluding poor candidates
-    seen: set[str] = set()
-    unique_cols: list[str] = []
-    for c in filter_columns:
-        if c.lower() not in seen and not is_poor_clustering_candidate(c):
-            seen.add(c.lower())
-            unique_cols.append(c)
-
-    if not unique_cols:
-        return (
-            "Add or adjust liquid clustering (CLUSTER BY) on the columns "
-            "used in WHERE predicates. Run OPTIMIZE on the table."
-        )
-
-    # Databricks supports up to 4 clustering columns
-    cluster_cols = unique_cols[:4]
-    col_list = ", ".join(cluster_cols)
+) -> tuple[str, dict[str, str], list[str]]:
+    """Return (action_text, per_table_actions, affected_tables)."""
+    fallback_action = (
+        "Enable liquid clustering and run OPTIMIZE on the table."
+    )
+    if not tables:
+        return fallback_action, {}, []
 
     user_tables = [t for t in tables if not t.lower().startswith("system.")]
     if not user_tables:
-        return (
-            "Add or adjust liquid clustering (CLUSTER BY) on the columns "
-            "used in WHERE predicates. Run OPTIMIZE on the table."
+        return fallback_action, {}, []
+
+    per_table: dict[str, str] = {}
+    for table in user_tables:
+        per_table[table] = (
+            f"ALTER TABLE {table} CLUSTER BY AUTO;\n"
+            f"OPTIMIZE {table};"
         )
 
-    lines: list[str] = []
-    for table in user_tables:
-        lines.append(f"ALTER TABLE {table} CLUSTER BY ({col_list});")
-        lines.append(f"OPTIMIZE {table};")
-
-    return "\n".join(lines)
+    action = "Enable liquid clustering and optimize each table:"
+    return action, per_table, user_tables

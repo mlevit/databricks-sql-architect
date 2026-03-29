@@ -289,3 +289,116 @@ class TestHivePartitioning:
             "db.schema.events", partitions=[], clustering=[], recs=recs,
         )
         assert recs == []
+
+
+class TestAffectedTables:
+    """Verify that check functions populate affected_tables and per_table_actions."""
+
+    def test_vacuum_has_affected_tables(self):
+        recs: list[Recommendation] = []
+        _check_vacuum_needed(
+            "cat.sch.my_table",
+            properties={},
+            size_bytes=500 * 1024 * 1024,
+            recs=recs,
+        )
+        assert len(recs) == 1
+        assert recs[0].affected_tables == ["cat.sch.my_table"]
+        assert "cat.sch.my_table" in recs[0].per_table_actions
+
+    def test_hive_partitioning_has_per_table_actions(self):
+        recs: list[Recommendation] = []
+        _check_hive_partitioning(
+            "cat.sch.events", partitions=["date"], clustering=[], recs=recs,
+        )
+        assert len(recs) == 1
+        assert recs[0].affected_tables == ["cat.sch.events"]
+        assert "ALTER TABLE" in recs[0].per_table_actions["cat.sch.events"]
+
+    def test_non_delta_has_affected_tables(self):
+        recs: list[Recommendation] = []
+        _check_non_delta_format("cat.sch.legacy", "parquet", recs)
+        assert len(recs) == 1
+        assert recs[0].affected_tables == ["cat.sch.legacy"]
+
+    def test_titles_do_not_contain_table_name(self):
+        """Titles should be generic (no table name embedded)."""
+        recs: list[Recommendation] = []
+        _check_vacuum_needed("cat.sch.t", properties={}, size_bytes=500 * 1024 * 1024, recs=recs)
+        _check_non_delta_format("cat.sch.t", "parquet", recs)
+        _check_hive_partitioning("cat.sch.t", partitions=["d"], clustering=[], recs=recs)
+        for r in recs:
+            assert "cat.sch.t" not in r.title
+
+
+class TestGroupRecommendations:
+    """Verify the recommendation grouping post-processing step."""
+
+    def test_same_title_merged(self):
+        from backend.analyzer import _group_recommendations
+        from backend.models import Category, Severity
+
+        r1 = Recommendation(
+            severity=Severity.INFO, category=Category.TABLE,
+            title="No evidence of VACUUM", description="desc1",
+            impact=4, affected_tables=["cat.sch.a"],
+            per_table_actions={"cat.sch.a": "VACUUM cat.sch.a;"},
+        )
+        r2 = Recommendation(
+            severity=Severity.INFO, category=Category.TABLE,
+            title="No evidence of VACUUM", description="desc2",
+            impact=4, affected_tables=["cat.sch.b"],
+            per_table_actions={"cat.sch.b": "VACUUM cat.sch.b;"},
+        )
+        grouped = _group_recommendations([r1, r2])
+        assert len(grouped) == 1
+        assert set(grouped[0].affected_tables) == {"cat.sch.a", "cat.sch.b"}
+        assert "cat.sch.a" in grouped[0].per_table_actions
+        assert "cat.sch.b" in grouped[0].per_table_actions
+
+    def test_different_titles_not_merged(self):
+        from backend.analyzer import _group_recommendations
+        from backend.models import Category, Severity
+
+        r1 = Recommendation(
+            severity=Severity.INFO, category=Category.TABLE,
+            title="Title A", description="desc", impact=4,
+            affected_tables=["t1"],
+        )
+        r2 = Recommendation(
+            severity=Severity.INFO, category=Category.TABLE,
+            title="Title B", description="desc", impact=4,
+            affected_tables=["t2"],
+        )
+        grouped = _group_recommendations([r1, r2])
+        assert len(grouped) == 2
+
+    def test_non_table_recs_pass_through(self):
+        from backend.analyzer import _group_recommendations
+        from backend.models import Category, Severity
+
+        r1 = Recommendation(
+            severity=Severity.WARNING, category=Category.QUERY,
+            title="SELECT * used", description="desc", impact=3,
+        )
+        grouped = _group_recommendations([r1])
+        assert len(grouped) == 1
+        assert grouped[0].title == "SELECT * used"
+
+    def test_max_impact_used_when_merging(self):
+        from backend.analyzer import _group_recommendations
+        from backend.models import Category, Severity
+
+        r1 = Recommendation(
+            severity=Severity.WARNING, category=Category.TABLE,
+            title="Same", description="d", impact=5,
+            affected_tables=["t1"],
+        )
+        r2 = Recommendation(
+            severity=Severity.WARNING, category=Category.TABLE,
+            title="Same", description="d", impact=8,
+            affected_tables=["t2"],
+        )
+        grouped = _group_recommendations([r1, r2])
+        assert len(grouped) == 1
+        assert grouped[0].impact == 8
