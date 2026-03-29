@@ -79,8 +79,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-6 flex-wrap">
-        <h1 className="text-base font-semibold whitespace-nowrap text-gray-900">
+      <header className="relative bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-center">
+        <h1 className="absolute left-6 text-base font-semibold whitespace-nowrap text-gray-900">
           Databricks Query Analyzer
         </h1>
         <QueryInput

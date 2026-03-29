@@ -162,6 +162,7 @@ interface RecommendationCardProps {
 }
 
 export function RecommendationCard({ recommendation: r, variant = "compact", tableName }: RecommendationCardProps) {
+  const [expanded, setExpanded] = useState(false);
   const tier = impactTier(r.impact);
   const tables = r.affected_tables ?? [];
   const perTableActions = r.per_table_actions ?? {};
@@ -171,8 +172,12 @@ export function RecommendationCard({ recommendation: r, variant = "compact", tab
   const scopedAction = tableName ? perTableActions[tableName] : null;
 
   return (
-    <div className={`p-3 rounded-lg border-l-[3px] ${REC_CARD_STYLES[r.severity] || "bg-gray-50 border-l-gray-300"}`}>
-      <div className="flex items-center gap-1.5 mb-1">
+    <div className={`rounded-lg border-l-[3px] ${REC_CARD_STYLES[r.severity] || "bg-gray-50 border-l-gray-300"}`}>
+      <button
+        className="w-full flex items-center gap-1.5 p-3 bg-transparent border-none cursor-pointer text-left"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+      >
         <span className="text-sm">{SEVERITY_ICONS[r.severity]}</span>
         <span className="font-semibold text-sm">{r.title}</span>
         {isFull && (
@@ -200,54 +205,72 @@ export function RecommendationCard({ recommendation: r, variant = "compact", tab
             </span>
           </>
         )}
-      </div>
+        <svg
+          className={`w-3 h-3 text-gray-400 transition-transform duration-200 shrink-0 ${!isFull ? "ml-auto" : ""} ${expanded ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 10 6"
+          aria-hidden="true"
+        >
+          <path
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            d="M1 1l4 4 4-4"
+          />
+        </svg>
+      </button>
 
-      <p className="text-[0.8rem] text-gray-500 mb-1 leading-relaxed">{r.description}</p>
+      {expanded && (
+        <div className="px-3 pb-3">
+          <p className="text-[0.8rem] text-gray-500 mb-1 leading-relaxed">{r.description}</p>
 
-      {isFull && tables.length > 0 && (
-        <div className="mt-1.5 mb-1">
-          <span className="text-[0.72rem] font-semibold text-gray-500">
-            Affects {tables.length} {tables.length === 1 ? "table" : "tables"}:
-          </span>
-          <div className="flex flex-wrap gap-1 mt-1">
-            {tables.map((t) => (
-              <span
-                key={t}
-                className="inline-block text-[0.68rem] font-mono bg-black/5 text-gray-700 px-2 py-0.5 rounded"
-              >
-                {t}
+          {isFull && tables.length > 0 && (
+            <div className="mt-1.5 mb-1">
+              <span className="text-[0.72rem] font-semibold text-gray-500">
+                Affects {tables.length} {tables.length === 1 ? "table" : "tables"}:
               </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {r.snippet && (
-        <pre className="bg-black/5 border-l-[3px] border-gray-300 px-2.5 py-1.5 my-1 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words">
-          <code className="font-mono text-gray-900">{r.snippet}</code>
-        </pre>
-      )}
-
-      {isFull && (
-        <>
-          {r.action && !hasPerTableActions && <ActionBlock action={r.action} />}
-          {r.action && hasPerTableActions && (
-            <div className="text-[0.78rem] text-gray-700 mt-1">
-              <strong>Suggested action:</strong> {r.action}
+              <div className="flex flex-wrap gap-1 mt-1">
+                {tables.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-block text-[0.68rem] font-mono bg-black/5 text-gray-700 px-2 py-0.5 rounded"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
-          {hasPerTableActions && <PerTableActions perTableActions={perTableActions} />}
-        </>
-      )}
 
-      {!isFull && (
-        <>
-          {scopedAction ? (
-            <SqlBlock code={scopedAction} />
-          ) : r.action ? (
-            <ActionBlock action={r.action} />
-          ) : null}
-        </>
+          {r.snippet && (
+            <pre className="bg-black/5 border-l-[3px] border-gray-300 px-2.5 py-1.5 my-1 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words">
+              <code className="font-mono text-gray-900">{r.snippet}</code>
+            </pre>
+          )}
+
+          {isFull && (
+            <>
+              {r.action && !hasPerTableActions && <ActionBlock action={r.action} />}
+              {r.action && hasPerTableActions && (
+                <div className="text-[0.78rem] text-gray-700 mt-1">
+                  <strong>Suggested action:</strong> {r.action}
+                </div>
+              )}
+              {hasPerTableActions && <PerTableActions perTableActions={perTableActions} />}
+            </>
+          )}
+
+          {!isFull && (
+            <>
+              {scopedAction ? (
+                <SqlBlock code={scopedAction} />
+              ) : r.action ? (
+                <ActionBlock action={r.action} />
+              ) : null}
+            </>
+          )}
+        </div>
       )}
     </div>
   );

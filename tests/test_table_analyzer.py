@@ -11,6 +11,7 @@ from backend.analyzers.table_analyzer import (
     _check_json_string_columns,
     _check_large_table_no_date_clustering,
     _check_non_delta_format,
+    _check_partition_skew_risk,
     _check_string_enum_columns,
     _check_under_partitioned,
     _check_vacuum_needed,
@@ -265,6 +266,70 @@ class TestPoorClusteringCandidate:
 
     def test_generic_column_accepted(self):
         assert is_poor_clustering_candidate("store_name") is False
+
+
+class TestPartitionSkewRisk:
+    def test_country_partition_flagged(self):
+        recs: list[Recommendation] = []
+        _check_partition_skew_risk(
+            "db.schema.events",
+            partitions=["country"],
+            size_bytes=LARGE_TABLE_THRESHOLD + 1,
+            recs=recs,
+        )
+        assert any("skew" in r.title.lower() for r in recs)
+
+    def test_tenant_id_partition_flagged(self):
+        recs: list[Recommendation] = []
+        _check_partition_skew_risk(
+            "db.schema.events",
+            partitions=["tenant_id"],
+            size_bytes=LARGE_TABLE_THRESHOLD + 1,
+            recs=recs,
+        )
+        assert any("skew" in r.title.lower() for r in recs)
+
+    def test_date_partition_not_flagged(self):
+        recs: list[Recommendation] = []
+        _check_partition_skew_risk(
+            "db.schema.events",
+            partitions=["event_date"],
+            size_bytes=LARGE_TABLE_THRESHOLD + 1,
+            recs=recs,
+        )
+        assert recs == []
+
+    def test_small_table_not_flagged(self):
+        recs: list[Recommendation] = []
+        _check_partition_skew_risk(
+            "db.schema.events",
+            partitions=["country"],
+            size_bytes=100 * 1024 * 1024,
+            recs=recs,
+        )
+        assert recs == []
+
+    def test_no_partitions_not_flagged(self):
+        recs: list[Recommendation] = []
+        _check_partition_skew_risk(
+            "db.schema.events",
+            partitions=[],
+            size_bytes=LARGE_TABLE_THRESHOLD + 1,
+            recs=recs,
+        )
+        assert recs == []
+
+    def test_has_affected_tables(self):
+        recs: list[Recommendation] = []
+        _check_partition_skew_risk(
+            "cat.sch.orders",
+            partitions=["region"],
+            size_bytes=LARGE_TABLE_THRESHOLD + 1,
+            recs=recs,
+        )
+        assert len(recs) == 1
+        assert recs[0].affected_tables == ["cat.sch.orders"]
+        assert "cat.sch.orders" in recs[0].per_table_actions
 
 
 class TestHivePartitioning:

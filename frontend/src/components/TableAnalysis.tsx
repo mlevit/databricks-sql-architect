@@ -44,10 +44,10 @@ function TableCard({ table }: { table: TableInfo }) {
         aria-expanded={expanded}
         aria-controls={panelId}
       >
-        <span className="font-semibold font-mono text-[0.8rem] shrink-0">
+        <span className="font-semibold font-mono text-[0.8rem] min-w-0 break-all">
           {table.full_name}
         </span>
-        <span className="flex gap-2 items-center ml-auto text-xs text-gray-400">
+        <span className="flex gap-2 items-center ml-auto text-xs text-gray-400 shrink-0">
           {table.format && (
             <span className="bg-gray-100 text-gray-500 text-xs font-medium px-2.5 py-0.5 rounded-full">
               {table.format}

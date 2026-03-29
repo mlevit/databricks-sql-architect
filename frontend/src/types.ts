@@ -50,6 +50,13 @@ export interface TableInfo {
   recommendations: Recommendation[];
 }
 
+export interface PlanHighlight {
+  line_start: number;
+  line_end: number;
+  severity: Severity;
+  reason: string;
+}
+
 export interface PlanSummary {
   raw_plan: string;
   scan_types: string[];
@@ -57,6 +64,7 @@ export interface PlanSummary {
   has_filter_pushdown: boolean;
   has_partition_pruning: boolean;
   warnings: string[];
+  highlights: PlanHighlight[];
 }
 
 export interface WarehouseInfo {

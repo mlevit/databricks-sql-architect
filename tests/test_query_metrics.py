@@ -162,6 +162,36 @@ class TestAnalyzeQueryMetrics:
         titles = [r.title for r in recs]
         assert "High result fetch time" in titles
 
+    def test_data_skew_detected(self):
+        m = self._make_metrics(
+            spilled_local_bytes=SPILL_THRESHOLD_BYTES + 1,
+            execution_duration_ms=10000,
+            total_task_duration_ms=12000,
+        )
+        recs = analyze_query_metrics(m)
+        titles = [r.title for r in recs]
+        assert "Data skew likely" in titles
+
+    def test_no_data_skew_without_spill(self):
+        m = self._make_metrics(
+            spilled_local_bytes=0,
+            execution_duration_ms=10000,
+            total_task_duration_ms=12000,
+        )
+        recs = analyze_query_metrics(m)
+        titles = [r.title for r in recs]
+        assert "Data skew likely" not in titles
+
+    def test_no_data_skew_with_high_parallelism(self):
+        m = self._make_metrics(
+            spilled_local_bytes=SPILL_THRESHOLD_BYTES + 1,
+            execution_duration_ms=10000,
+            total_task_duration_ms=100000,
+        )
+        recs = analyze_query_metrics(m)
+        titles = [r.title for r in recs]
+        assert "Data skew likely" not in titles
+
     def test_low_parallelism(self):
         m = self._make_metrics(
             execution_duration_ms=10000,

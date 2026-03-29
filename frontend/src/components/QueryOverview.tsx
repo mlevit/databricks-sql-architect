@@ -1,10 +1,13 @@
+import { useState } from "react";
 import type { QueryMetrics } from "../types";
+import FullScreenModal, { ExpandButton } from "./FullScreenModal";
 
 interface Props {
   metrics: QueryMetrics;
 }
 
 export default function QueryOverview({ metrics }: Props) {
+  const [queryFullScreen, setQueryFullScreen] = useState(false);
   const segments = [
     { label: "Waiting for compute", ms: metrics.waiting_for_compute_duration_ms, color: "#9aa0a6" },
     { label: "Waiting at capacity", ms: metrics.waiting_at_capacity_duration_ms, color: "#e37400" },
@@ -35,11 +38,23 @@ export default function QueryOverview({ metrics }: Props) {
         )}
       </div>
 
-      <div className="bg-gray-900 text-gray-300 rounded-lg p-4 overflow-x-auto mb-4">
+      <div className="relative bg-gray-900 text-gray-300 rounded-lg p-4 overflow-x-auto mb-4 group">
+        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <ExpandButton onClick={() => setQueryFullScreen(true)} />
+        </div>
         <pre className="m-0 whitespace-pre-wrap break-words text-[0.8rem] leading-relaxed font-mono">
           <code>{metrics.statement_text}</code>
         </pre>
       </div>
+      <FullScreenModal
+        title="SQL Query"
+        open={queryFullScreen}
+        onClose={() => setQueryFullScreen(false)}
+      >
+        <pre className="m-0 whitespace-pre-wrap break-words text-sm leading-relaxed font-mono">
+          <code>{metrics.statement_text}</code>
+        </pre>
+      </FullScreenModal>
 
       <div>
         <h3 className="text-sm font-semibold mt-3 mb-2">Duration Breakdown</h3>

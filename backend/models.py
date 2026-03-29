@@ -82,6 +82,13 @@ class TableInfo(BaseModel):
     recommendations: list[Recommendation] = Field(default_factory=list)
 
 
+class PlanHighlight(BaseModel):
+    line_start: int = Field(description="0-indexed first line of the highlighted region")
+    line_end: int = Field(description="0-indexed last line (inclusive)")
+    severity: Severity
+    reason: str = Field(description="Why this part of the plan is problematic")
+
+
 class PlanSummary(BaseModel):
     raw_plan: str
     scan_types: list[str] = Field(default_factory=list)
@@ -89,6 +96,7 @@ class PlanSummary(BaseModel):
     has_filter_pushdown: bool = False
     has_partition_pruning: bool = False
     warnings: list[str] = Field(default_factory=list)
+    highlights: list[PlanHighlight] = Field(default_factory=list)
 
 
 class WarehouseInfo(BaseModel):

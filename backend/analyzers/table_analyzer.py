@@ -338,6 +338,9 @@ def _analyze_single_table(
         table_name, clustering, partitions, size_bytes, columns or [], recs,
     )
 
+    # D14: Partition columns prone to data skew
+    _check_partition_skew_risk(table_name, partitions, size_bytes, recs)
+
     # D15: STRING columns likely storing JSON
     _check_json_string_columns(table_name, columns or [], recs)
 
@@ -758,6 +761,51 @@ def _check_large_table_no_date_clustering(
         per_table_actions={
             table_name: (
                 f"ALTER TABLE {table_name} CLUSTER BY ({best_col});\n"
+                f"OPTIMIZE {table_name};"
+            ),
+        },
+        impact=6,
+    ))
+
+
+# ---------------------------------------------------------------------------
+# D14: Partition columns prone to data skew
+# ---------------------------------------------------------------------------
+def _check_partition_skew_risk(
+    table_name: str,
+    partitions: list[str],
+    size_bytes: int | None,
+    recs: list[Recommendation],
+) -> None:
+    """Warn when a large partitioned table uses columns with inherently skewed distributions."""
+    if not partitions:
+        return
+    if not size_bytes or size_bytes < LARGE_TABLE_THRESHOLD:
+        return
+
+    skew_prone = [p for p in partitions if _SKEW_PRONE_PARTITION_PATTERNS.search(p)]
+    if not skew_prone:
+        return
+
+    cols_str = ", ".join(skew_prone)
+    recs.append(Recommendation(
+        severity=Severity.WARNING,
+        category=Category.TABLE,
+        title="Partition columns prone to data skew",
+        description=(
+            f"Table is partitioned on column(s) ({cols_str}) that commonly have "
+            "highly uneven data distributions. A few dominant values (e.g. one "
+            "country or tenant) can create oversized partitions, leading to task "
+            "skew during queries, uneven file sizes, and spill on hot partitions."
+        ),
+        action=(
+            "Migrate to liquid clustering which handles skew more gracefully, "
+            "or add a secondary partition column to spread the data more evenly."
+        ),
+        affected_tables=[table_name],
+        per_table_actions={
+            table_name: (
+                f"ALTER TABLE {table_name} CLUSTER BY ({', '.join(partitions[:4])});\n"
                 f"OPTIMIZE {table_name};"
             ),
         },
