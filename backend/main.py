@@ -159,6 +159,7 @@ class BenchmarkRequest(BaseModel):
     original_sql: str
     suggested_sql: str
     warehouse_id: str | None = None
+    parameters: dict[str, str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +221,7 @@ async def benchmark_start(req: BenchmarkRequest):
     def run_one(phase: str, sql: str) -> None:
         try:
             job["progress"][phase] = {"phase": phase, "state": "STARTING", "elapsed_ms": 0}
-            raw = execute_sql_with_metrics(sql, warehouse_id=wid, on_poll=_poll_cb(phase))
+            raw = execute_sql_with_metrics(sql, warehouse_id=wid, parameters=req.parameters, on_poll=_poll_cb(phase))
             job["progress"][phase] = {
                 "phase": phase, "state": "DONE",
                 "statement_id": raw.get("statement_id"), "elapsed_ms": raw["elapsed_ms"],

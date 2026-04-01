@@ -1,6 +1,16 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { type BenchmarkProgress, benchmarkQueriesPoll, cancelBenchmarkQuery, rewriteQuery } from "../api";
 import type { AIRewriteResult, BenchmarkResult, QueryBenchmarkStats } from "../types";
+
+function extractParameters(sql: string): string[] {
+  const regex = /(?<!:):([a-zA-Z_][a-zA-Z0-9_]*)/g;
+  const params = new Set<string>();
+  let match;
+  while ((match = regex.exec(sql)) !== null) {
+    params.add(match[1]);
+  }
+  return Array.from(params).sort();
+}
 
 interface Props {
   statementId: string;
@@ -337,6 +347,25 @@ export default function AIRewrite({ statementId, warehouseId }: Props) {
   const [benchProgress, setBenchProgress] = useState<Record<string, BenchmarkProgress>>({});
   const [benchmarkId, setBenchmarkId] = useState<string | null>(null);
   const [customInstruction, setCustomInstruction] = useState("");
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
+
+  const detectedParams = useMemo(() => {
+    if (!result) return [];
+    const fromOriginal = extractParameters(result.original_sql);
+    const fromSuggested = extractParameters(result.suggested_sql);
+    const merged = new Set([...fromOriginal, ...fromSuggested]);
+    return Array.from(merged).sort();
+  }, [result]);
+
+  useEffect(() => {
+    setParamValues((prev) => {
+      const next: Record<string, string> = {};
+      for (const p of detectedParams) {
+        next[p] = prev[p] ?? "";
+      }
+      return next;
+    });
+  }, [detectedParams]);
 
   const handleRewrite = async () => {
     setLoading(true); setError(null); setBenchmark(null); setBenchError(null);
@@ -345,10 +374,13 @@ export default function AIRewrite({ statementId, warehouseId }: Props) {
     finally { setLoading(false); }
   };
 
+  const hasUnfilledParams = detectedParams.length > 0 && detectedParams.some((p) => !paramValues[p]?.trim());
+
   const handleBenchmark = async () => {
     if (!result) return;
+    const params = detectedParams.length > 0 ? paramValues : undefined;
     setBenchLoading(true); setBenchError(null); setBenchProgress({}); setBenchmarkId(null);
-    await benchmarkQueriesPoll(result.original_sql, result.suggested_sql, warehouseId, {
+    await benchmarkQueriesPoll(result.original_sql, result.suggested_sql, warehouseId, params, {
       onStarted: (id) => setBenchmarkId(id),
       onProgress: (progress) => setBenchProgress(progress),
       onResult: (data) => setBenchmark(data),
@@ -425,6 +457,31 @@ export default function AIRewrite({ statementId, warehouseId }: Props) {
             </div>
           </div>
 
+          {detectedParams.length > 0 && (
+            <div className="mb-3 glass-card p-4">
+              <h3 className="text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500 mb-2">Query Parameters</h3>
+              <p className="text-xs text-slate-500 mb-3">The query contains parameters that need values before benchmarking.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {detectedParams.map((param) => (
+                  <div key={param}>
+                    <label htmlFor={`param-${param}`} className="block text-sm font-medium text-slate-400 mb-1 font-mono">
+                      :{param}
+                    </label>
+                    <input
+                      id={`param-${param}`}
+                      type="text"
+                      className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-500/40 focus:bg-white/[0.05] focus:outline-none transition-colors font-mono"
+                      placeholder={`Value for :${param}`}
+                      value={paramValues[param] ?? ""}
+                      onChange={(e) => setParamValues((prev) => ({ ...prev, [param]: e.target.value }))}
+                      disabled={benchLoading}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mb-3">
             <label htmlFor="custom-instruction-regen" className="block text-sm font-medium text-slate-400 mb-1">Custom instruction <span className="text-slate-600 font-normal">(optional)</span></label>
             <textarea id="custom-instruction-regen" className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-violet-500/40 focus:bg-white/[0.05] focus:outline-none transition-colors resize-y" rows={2} placeholder="e.g. Avoid using subqueries, prefer CTEs instead" value={customInstruction} onChange={(e) => setCustomInstruction(e.target.value)} disabled={loading || benchLoading} />
@@ -434,7 +491,7 @@ export default function AIRewrite({ statementId, warehouseId }: Props) {
             <button className="text-white font-medium rounded-xl text-sm px-5 py-2.5 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 hover:shadow-[0_0_25px_rgba(139,92,246,0.3)]" onClick={handleRewrite} disabled={loading || benchLoading}>
               {loading ? "Regenerating..." : "Regenerate"}
             </button>
-            <button className="text-white font-medium rounded-xl text-sm px-5 py-2.5 transition-all disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center gap-2 cursor-pointer bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 hover:shadow-[0_0_25px_rgba(34,211,238,0.3)]" onClick={handleBenchmark} disabled={benchLoading || loading}>
+            <button className="text-white font-medium rounded-xl text-sm px-5 py-2.5 transition-all disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center gap-2 cursor-pointer bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 hover:shadow-[0_0_25px_rgba(34,211,238,0.3)]" onClick={handleBenchmark} disabled={benchLoading || loading || hasUnfilledParams} title={hasUnfilledParams ? "Fill in all query parameters before running" : undefined}>
               {benchLoading ? (
                 <>
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
