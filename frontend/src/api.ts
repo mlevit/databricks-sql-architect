@@ -113,18 +113,23 @@ export async function benchmarkQueriesPoll(
   originalSql: string,
   suggestedSql: string,
   warehouseId: string | undefined,
+  parameters: Record<string, string> | undefined,
   callbacks: BenchmarkPollCallbacks,
 ): Promise<void> {
   let benchmarkId: string;
   try {
+    const payload: Record<string, unknown> = {
+      original_sql: originalSql,
+      suggested_sql: suggestedSql,
+      warehouse_id: warehouseId ?? null,
+    };
+    if (parameters && Object.keys(parameters).length > 0) {
+      payload.parameters = parameters;
+    }
     const startRes = await request<{ benchmark_id: string }>(`${BASE}/benchmark/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        original_sql: originalSql,
-        suggested_sql: suggestedSql,
-        warehouse_id: warehouseId ?? null,
-      }),
+      body: JSON.stringify(payload),
     });
     benchmarkId = startRes.benchmark_id;
     callbacks.onStarted?.(benchmarkId);

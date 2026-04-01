@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import sql as sql_service
-from databricks.sdk.service.sql import StatementState
+from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +72,17 @@ def execute_sql_with_metrics(
     statement: str,
     *,
     warehouse_id: str | None = None,
+    parameters: dict[str, str] | None = None,
     on_poll: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Execute a SQL statement and return wall-clock time plus manifest stats.
 
     Returns a dict with keys: elapsed_ms, row_count, byte_count, status,
     statement_id, and error (if failed).
+
+    *parameters* is an optional dict mapping parameter names to string values.
+    These are passed to Databricks as native statement parameters (``:`-prefixed
+    markers in the SQL text).
 
     *on_poll* is an optional callback invoked during the polling loop and
     metric-fetch phase so callers (e.g. SSE endpoints) can relay progress.
@@ -90,6 +95,13 @@ def execute_sql_with_metrics(
 
     logger.info("Benchmark executing on warehouse %s: %s", wid, statement[:200])
 
+    sdk_params: list[StatementParameterListItem] | None = None
+    if parameters:
+        sdk_params = [
+            StatementParameterListItem(name=k, value=v)
+            for k, v in parameters.items()
+        ]
+
     w.statement_execution.execute_statement(
         warehouse_id=wid,
         statement="SET use_cached_result = false",
@@ -100,6 +112,7 @@ def execute_sql_with_metrics(
     response = w.statement_execution.execute_statement(
         warehouse_id=wid,
         statement=statement,
+        parameters=sdk_params,
         wait_timeout="0s",
     )
 

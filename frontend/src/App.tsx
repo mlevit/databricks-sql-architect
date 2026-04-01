@@ -1,28 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { analyzeQueryStream } from "./api";
 import type { StepProgress } from "./api";
-import AIRewrite from "./components/AIRewrite";
-import MetricsCards from "./components/MetricsCards";
-import PlanSummary from "./components/PlanSummary";
+import LandingPage from "./components/LandingPage";
 import ProgressStepper from "./components/ProgressStepper";
 import QueryInput from "./components/QueryInput";
-import QueryOverview from "./components/QueryOverview";
-import Recommendations from "./components/Recommendations";
-import TableAnalysis from "./components/TableAnalysis";
-import WarehouseInfo from "./components/WarehouseInfo";
+import PerformanceTab from "./components/PerformanceTab";
+import SystemTab from "./components/SystemTab";
+import OptimizationTab from "./components/OptimizationTab";
 import type { AnalysisResult } from "./types";
 
-const TABS = [
-  "Overview",
-  "Metrics",
-  "Tables",
-  "Plan",
-  "Warehouse",
-  "Recommendations",
-  "AI Rewrite",
-] as const;
-
+const TABS = ["Performance", "System", "Optimization"] as const;
 type Tab = (typeof TABS)[number];
+
+const TAB_ICONS: Record<Tab, JSX.Element> = {
+  Performance: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v4l3 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5"/></svg>
+  ),
+  System: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="3" y="2" width="10" height="4" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="3" y="10" width="10" height="4" rx="1" stroke="currentColor" strokeWidth="1.5"/><path d="M8 6v4" stroke="currentColor" strokeWidth="1.5"/></svg>
+  ),
+  Optimization: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2l1.5 4H14l-3.5 2.5L12 13 8 10.5 4 13l1.5-4.5L2 6h4.5L8 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>
+  ),
+};
 
 function getInitialStatementId(): string {
   const params = new URLSearchParams(window.location.search);
@@ -33,7 +33,7 @@ export default function App() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("Overview");
+  const [tab, setTab] = useState<Tab>("Performance");
   const [statementId, setStatementId] = useState(getInitialStatementId);
   const [progress, setProgress] = useState<StepProgress | null>(null);
   const autoTriggered = useRef(false);
@@ -53,7 +53,7 @@ export default function App() {
       onProgress: (p) => setProgress(p),
       onResult: (data) => {
         setResult(data);
-        setTab("Overview");
+        setTab("Performance");
         setLoading(false);
         setProgress(null);
       },
@@ -75,29 +75,51 @@ export default function App() {
   }, [handleAnalyze]);
 
   const recCount = result?.recommendations.length ?? 0;
-  const tabPanelId = `tabpanel-${tab.replace(/\s+/g, "-").toLowerCase()}`;
+  const showLanding = !result && !loading && !error;
+
+  if (showLanding) {
+    return (
+      <LandingPage
+        onSubmit={handleAnalyze}
+        loading={loading}
+        initialValue={statementId}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="relative bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-center">
-        <h1 className="absolute left-6 text-base font-semibold whitespace-nowrap text-gray-900">
-          Databricks Query Analyzer
+    <div className="min-h-screen bg-[#060918] text-slate-200">
+      {/* Glass header */}
+      <header className="backdrop-blur-xl bg-white/[0.03] border-b border-white/[0.06] px-6 py-2.5 flex items-center gap-6 sticky top-0 z-40">
+        <h1
+          className="text-base font-bold whitespace-nowrap cursor-pointer shrink-0 gradient-text"
+          onClick={() => {
+            setResult(null);
+            setError(null);
+            setStatementId("");
+            const url = new URL(window.location.href);
+            url.searchParams.delete("statement_id");
+            window.history.replaceState(null, "", url.toString());
+          }}
+        >
+          SQL Architect
         </h1>
         <QueryInput
           onSubmit={handleAnalyze}
           loading={loading}
           initialValue={statementId}
+          variant="compact"
         />
       </header>
 
       {error && (
         <div
-          className="flex items-center justify-between gap-3 max-w-5xl mx-auto mt-3 px-4 py-3 text-sm text-red-800 border border-red-300 rounded-lg bg-red-50"
+          className="flex items-center justify-between gap-3 max-w-5xl mx-auto mt-3 px-4 py-3 text-sm text-red-300 glass-card border-red-500/20"
           role="alert"
         >
           <span>{error}</span>
           <button
-            className="bg-transparent border-none text-red-800 text-lg cursor-pointer px-1 leading-none opacity-60 hover:opacity-100 transition-opacity"
+            className="bg-transparent border-none text-red-300 text-lg cursor-pointer px-1 leading-none opacity-60 hover:opacity-100 transition-opacity"
             onClick={() => setError(null)}
             aria-label="Dismiss error"
           >
@@ -113,82 +135,59 @@ export default function App() {
       )}
 
       {result && (
-        <div
-          className={`mx-auto px-6 py-5 transition-all ${tab === "AI Rewrite" ? "max-w-[1600px]" : "max-w-5xl"}`}
-        >
+        <div className={`mx-auto px-6 py-5 transition-all ${tab === "Optimization" ? "max-w-[1600px]" : "max-w-5xl"}`}>
+          {/* Pill tab navigation */}
           <nav
-            className="flex border-b border-gray-200 mb-4 overflow-x-auto scrollbar-hide"
+            className="flex items-center justify-center mb-6"
             role="tablist"
             aria-label="Analysis sections"
           >
-            {TABS.map((t) => (
-              <button
-                key={t}
-                role="tab"
-                aria-selected={tab === t}
-                aria-controls={`tabpanel-${t.replace(/\s+/g, "-").toLowerCase()}`}
-                className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px cursor-pointer transition-colors ${
-                  tab === t
-                    ? "text-blue-600 border-blue-600 font-semibold"
-                    : "text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300"
-                }`}
-                onClick={() => setTab(t)}
-              >
-                {t}
-                {t === "Recommendations" && recCount > 0 && (
-                  <span className="bg-red-600 text-white text-xs font-semibold px-2 py-0.5 rounded-full leading-tight">
-                    {recCount}
-                  </span>
-                )}
-              </button>
-            ))}
+            <div className="inline-flex bg-white/[0.04] rounded-full p-1 gap-1">
+              {TABS.map((t) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={tab === t}
+                  aria-controls={`tabpanel-${t.toLowerCase()}`}
+                  className={`inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium whitespace-nowrap rounded-full cursor-pointer transition-all duration-300 ${
+                    tab === t
+                      ? "bg-white/[0.08] text-white shadow-[0_0_20px_rgba(59,130,246,0.15)]"
+                      : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.03]"
+                  }`}
+                  onClick={() => setTab(t)}
+                >
+                  {TAB_ICONS[t]}
+                  {t}
+                  {t === "Optimization" && recCount > 0 && (
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           </nav>
 
-          <main role="tabpanel" id={tabPanelId} aria-label={tab}>
-            {tab === "Overview" && (
-              <QueryOverview metrics={result.query_metrics} />
+          <main role="tabpanel" id={`tabpanel-${tab.toLowerCase()}`} aria-label={tab}>
+            {tab === "Performance" && (
+              <PerformanceTab metrics={result.query_metrics} />
             )}
-            {tab === "Metrics" && (
-              <MetricsCards metrics={result.query_metrics} />
+            {tab === "System" && (
+              <SystemTab
+                warehouse={result.warehouse}
+                tables={result.tables}
+                planSummary={result.plan_summary}
+              />
             )}
-            {tab === "Tables" && <TableAnalysis tables={result.tables} />}
-            {tab === "Plan" &&
-              (result.plan_summary ? (
-                <PlanSummary plan={result.plan_summary} />
-              ) : (
-                <div className="bg-white rounded-lg border border-gray-200 p-5">
-                  <h2 className="text-base font-semibold mb-3">Execution Plan</h2>
-                  <p className="text-gray-500">
-                    No execution plan available. EXPLAIN is only supported for
-                    SELECT statements.
-                  </p>
-                </div>
-              ))}
-            {tab === "Warehouse" &&
-              (result.warehouse ? (
-                <WarehouseInfo warehouse={result.warehouse} />
-              ) : (
-                <div className="bg-white rounded-lg border border-gray-200 p-5">
-                  <h2 className="text-base font-semibold mb-3">Warehouse</h2>
-                  <p className="text-gray-500">No warehouse information available.</p>
-                </div>
-              ))}
-            {tab === "Recommendations" && (
-              <Recommendations recommendations={result.recommendations} />
-            )}
-            {tab === "AI Rewrite" && (
-              <AIRewrite
+            {tab === "Optimization" && (
+              <OptimizationTab
+                recommendations={result.recommendations}
                 statementId={statementId}
                 warehouseId={result.query_metrics.warehouse_id ?? undefined}
               />
             )}
           </main>
-        </div>
-      )}
-
-      {!result && !loading && !error && (
-        <div className="text-center py-24 px-8 text-gray-400">
-          <p>Enter a statement ID above to begin analysis.</p>
         </div>
       )}
     </div>
