@@ -119,7 +119,7 @@ def _extract_table_name(candidate: str | None) -> str | None:
     """Return a cleaned table name if the candidate looks like one (contains a dot)."""
     if not candidate:
         return None
-    cleaned = candidate.strip("[](),")
+    cleaned = candidate.split("[", 1)[0].strip("[](),")
     if "." in cleaned and not cleaned.startswith("#"):
         return cleaned
     return None
