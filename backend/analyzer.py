@@ -252,6 +252,7 @@ def run_analysis(
     progress(0, STEPS[0], "done")
 
     all_recs: list[Recommendation] = []
+    all_warnings: list[str] = []
 
     # Step 2 — Parse SQL structure (needed by metrics analysis for clustering suggestions)
     progress(1, STEPS[1], "running")
@@ -268,7 +269,8 @@ def run_analysis(
 
     # Step 4 — Analyze tables
     progress(3, STEPS[3], "running")
-    tables = analyze_tables(parsed.tables, parsed)
+    tables, table_warnings = analyze_tables(parsed.tables, parsed)
+    all_warnings.extend(table_warnings)
     for t in tables:
         all_recs.extend(t.recommendations)
     progress(3, STEPS[3], "done")
@@ -314,6 +316,7 @@ def run_analysis(
         plan_summary=plan_summary,
         warehouse=warehouse_info,
         recommendations=all_recs,
+        warnings=all_warnings,
     )
 
 

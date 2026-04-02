@@ -359,8 +359,14 @@ def fetch_query_load_timeline(
     warehouse_id: str,
     start_time: str,
     end_time: str,
+    *,
+    buffer_minutes: int = 5,
 ) -> list[dict[str, Any]]:
-    """Return per-minute count of running queries on the warehouse during the window."""
+    """Return per-minute count of running queries on the warehouse during the window.
+
+    Includes ``buffer_minutes`` of context before and after the query so the
+    chart shows surrounding warehouse activity.
+    """
     safe_wid = warehouse_id.replace("'", "''")
     safe_start = start_time.replace("'", "''")
     safe_end = end_time.replace("'", "''")
@@ -368,8 +374,8 @@ def fetch_query_load_timeline(
     sql = (
         "WITH buckets AS ("
         "  SELECT EXPLODE(SEQUENCE("
-        f"    DATE_TRUNC('minute', TIMESTAMP '{safe_start}'),"
-        f"    TIMESTAMP '{safe_end}',"
+        f"    DATE_TRUNC('minute', TIMESTAMPADD(MINUTE, -{buffer_minutes}, TIMESTAMP '{safe_start}')),"
+        f"    TIMESTAMPADD(MINUTE, {buffer_minutes}, TIMESTAMP '{safe_end}'),"
         "    INTERVAL 1 MINUTE"
         "  )) AS bucket_start"
         "), "
@@ -378,8 +384,8 @@ def fetch_query_load_timeline(
         "    COALESCE(waiting_at_capacity_duration_ms, 0) AS wait_ms "
         "  FROM system.query.history "
         f"  WHERE compute.warehouse_id = '{safe_wid}' "
-        f"    AND start_time < TIMESTAMPADD(MINUTE, 1, TIMESTAMP '{safe_end}') "
-        f"    AND end_time > TIMESTAMP '{safe_start}'"
+        f"    AND start_time < TIMESTAMPADD(MINUTE, {buffer_minutes + 1}, TIMESTAMP '{safe_end}') "
+        f"    AND end_time > TIMESTAMPADD(MINUTE, -{buffer_minutes}, TIMESTAMP '{safe_start}')"
         ") "
         "SELECT b.bucket_start AS bucket_time, "
         "  COUNT(q.q_start) AS running_count, "

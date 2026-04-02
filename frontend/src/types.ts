@@ -126,6 +126,7 @@ export interface AnalysisResult {
   plan_summary: PlanSummary | null;
   warehouse: WarehouseInfo | null;
   recommendations: Recommendation[];
+  warnings: string[];
 }
 
 export interface AIRewriteResult {

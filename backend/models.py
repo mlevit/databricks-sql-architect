@@ -166,6 +166,7 @@ class AnalysisResult(BaseModel):
     plan_summary: Optional[PlanSummary] = None
     warehouse: Optional[WarehouseInfo] = None
     recommendations: list[Recommendation] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class QueryExecutionMetrics(BaseModel):

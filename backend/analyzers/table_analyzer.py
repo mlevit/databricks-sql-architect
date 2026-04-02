@@ -4,6 +4,7 @@ import contextvars
 import json
 import logging
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -58,6 +59,15 @@ _SKEW_PRONE_PARTITION_PATTERNS = re.compile(
 
 _SAFE_TABLE_NAME_RE = re.compile(r"^(`[\w]+`|\w[\w]*)(\.(`[\w]+`|\w[\w]*))*$")
 
+_SDK_MESSAGE_RE = re.compile(r'message="([^"]+)"')
+
+
+def _extract_error_message(exc: Exception) -> str:
+    """Extract a human-readable message from SDK exceptions."""
+    text = str(exc)
+    m = _SDK_MESSAGE_RE.search(text)
+    return m.group(1) if m else text
+
 
 def _unquote_table_name(name: str) -> str:
     """Strip backtick quoting from a fully-qualified table name for API calls."""
@@ -82,25 +92,31 @@ def _is_safe_table_name(name: str) -> bool:
     return bool(_SAFE_TABLE_NAME_RE.match(name)) and len(name) <= 256
 
 
-def fetch_table_detail(table_name: str) -> dict[str, Any] | None:
+def fetch_table_detail(
+    table_name: str,
+) -> tuple[dict[str, Any] | None, str | None]:
     if not _is_safe_table_name(table_name):
         logger.warning(
             "Skipping DESCRIBE DETAIL for unsafe table name: %s", table_name[:100]
         )
-        return None
+        return None, None
     try:
         rows = execute_sql(f"DESCRIBE DETAIL {table_name}")
         if rows:
-            return rows[0]
+            return rows[0], None
     except Exception as exc:
         logger.warning("Failed to DESCRIBE DETAIL %s: %s", table_name, exc)
-    return None
+        msg = _extract_error_message(exc)
+        return None, f"Could not fetch details for `{table_name}`: {msg}"
+    return None, None
 
 
-def fetch_table_columns(table_name: str) -> list[ColumnInfo]:
+def fetch_table_columns(
+    table_name: str,
+) -> tuple[list[ColumnInfo], str | None]:
     """Fetch column names, types, and comments via DESCRIBE TABLE."""
     if not _is_safe_table_name(table_name):
-        return []
+        return [], None
     try:
         rows = execute_sql(f"DESCRIBE TABLE {table_name}")
         columns: list[ColumnInfo] = []
@@ -119,19 +135,22 @@ def fetch_table_columns(table_name: str) -> list[ColumnInfo]:
                     comment=comment if comment else None,
                 )
             )
-        return columns
+        return columns, None
     except Exception as exc:
         logger.warning("Failed to DESCRIBE TABLE %s: %s", table_name, exc)
-        return []
+        msg = _extract_error_message(exc)
+        return [], f"Could not fetch columns for `{table_name}`: {msg}"
 
 
-def fetch_table_cbo_stats(table_name: str) -> dict[str, Any]:
+def fetch_table_cbo_stats(
+    table_name: str,
+) -> tuple[dict[str, Any], str | None]:
     """Fetch statistics via the Unity Catalog Tables API.
 
     The Tables API ``properties`` map contains ``spark.sql.statistics.*``
     keys when ANALYZE TABLE has been run (manually or via AUTO_STATS).
 
-    Returns a dict with ``has_cbo_stats``, ``num_rows``, and ``total_size``.
+    Returns a tuple of (stats_dict, warning_or_none).
     """
     empty: dict[str, Any] = {
         "has_cbo_stats": False,
@@ -139,7 +158,7 @@ def fetch_table_cbo_stats(table_name: str) -> dict[str, Any]:
         "total_size": None,
     }
     if not _is_safe_table_name(table_name):
-        return empty
+        return empty, None
     try:
         w = get_client()
         api_name = _unquote_table_name(table_name)
@@ -152,16 +171,17 @@ def fetch_table_cbo_stats(table_name: str) -> dict[str, Any]:
             "has_cbo_stats": has_stats,
             "num_rows": int(num_rows_str) if num_rows_str else None,
             "total_size": int(total_size_str) if total_size_str else None,
-        }
+        }, None
     except Exception as exc:
         logger.warning("Failed to fetch catalog properties for %s: %s", table_name, exc)
-        return empty
+        msg = _extract_error_message(exc)
+        return empty, f"Could not fetch catalog properties for `{table_name}`: {msg}"
 
 
 def analyze_tables(
     table_names: list[str],
     parsed_query: ParsedQuery,
-) -> list[TableInfo]:
+) -> tuple[list[TableInfo], list[str]]:
     fetchable = [n for n in table_names if not n.lower().startswith("system.")]
     system_tables = [n for n in table_names if n.lower().startswith("system.")]
 
@@ -173,6 +193,15 @@ def analyze_tables(
         "num_rows": None,
         "total_size": None,
     }
+
+    warnings: list[str] = []
+    warnings_lock = threading.Lock()
+
+    def _collect_warning(warning: str | None) -> None:
+        if warning:
+            with warnings_lock:
+                warnings.append(warning)
+
     if fetchable:
 
         def _submit(pool, fn, *args):
@@ -196,12 +225,14 @@ def analyze_tables(
             for future in as_completed(all_futures):
                 kind, name = all_futures[future]
                 try:
+                    result, warning = future.result()
+                    _collect_warning(warning)
                     if kind == "detail":
-                        details_map[name] = future.result()
+                        details_map[name] = result
                     elif kind == "columns":
-                        columns_map[name] = future.result()
+                        columns_map[name] = result
                     else:
-                        cbo_stats_map[name] = future.result()
+                        cbo_stats_map[name] = result
                 except Exception:
                     if kind == "detail":
                         details_map[name] = None
@@ -267,7 +298,14 @@ def analyze_tables(
             )
         )
 
-    return results
+    seen = set()
+    deduped_warnings = []
+    for w in warnings:
+        if w not in seen:
+            seen.add(w)
+            deduped_warnings.append(w)
+
+    return results, deduped_warnings
 
 
 def _strip_table_prefix(col: str) -> str:

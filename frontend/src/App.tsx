@@ -45,6 +45,7 @@ export default function App() {
     setResult(null);
     setProgress(null);
     setStatementId(id);
+    setDismissedWarnings(false);
 
     const url = new URL(window.location.href);
     url.searchParams.set("statement_id", id);
@@ -74,6 +75,8 @@ export default function App() {
       handleAnalyze(initial);
     }
   }, [handleAnalyze]);
+
+  const [dismissedWarnings, setDismissedWarnings] = useState(false);
 
   const recCount = result?.recommendations.length ?? 0;
   const showLanding = !result && !loading && !error;
@@ -127,6 +130,36 @@ export default function App() {
           >
             &times;
           </button>
+        </div>
+      )}
+
+      {result && result.warnings?.length > 0 && !dismissedWarnings && (
+        <div
+          className="max-w-5xl mx-auto mt-3 px-4 py-3 text-sm glass-card border-amber-500/20"
+          role="status"
+        >
+          <div className="flex items-start gap-3">
+            <svg className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86l-8.7 15.04A1 1 0 002.46 20.5h17.08a1 1 0 00.87-1.5l-8.7-15.04a1 1 0 00-1.74 0z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-amber-300 mb-1">
+                Some tables could not be fully analyzed
+              </p>
+              <ul className="list-none p-0 m-0 flex flex-col gap-1">
+                {result.warnings.map((w, i) => (
+                  <li key={i} className="text-amber-200/70 text-xs font-mono break-all">{w}</li>
+                ))}
+              </ul>
+            </div>
+            <button
+              className="bg-transparent border-none text-amber-300 text-lg cursor-pointer px-1 leading-none opacity-60 hover:opacity-100 transition-opacity shrink-0"
+              onClick={() => setDismissedWarnings(true)}
+              aria-label="Dismiss warnings"
+            >
+              &times;
+            </button>
+          </div>
         </div>
       )}
 

@@ -108,7 +108,10 @@ def analyze_warehouse(
             impact=2,
         ))
 
-    activity = _fetch_activity(warehouse_id, statement_id, start_time, end_time)
+    activity = _fetch_activity(
+        warehouse_id, statement_id, start_time, end_time,
+        fallback_cluster_count=config.get("num_clusters"),
+    )
     if activity:
         recs.extend(_activity_recommendations(activity))
 
@@ -135,6 +138,8 @@ def _fetch_activity(
     statement_id: str | None,
     start_time: str | None,
     end_time: str | None,
+    *,
+    fallback_cluster_count: int | None = None,
 ) -> WarehouseActivity | None:
     """Best-effort fetch of warehouse activity during the query window."""
     if not (statement_id and start_time and end_time):
@@ -163,6 +168,9 @@ def _fetch_activity(
     except Exception as exc:
         logger.warning("Failed to fetch scaling events: %s", exc)
 
+    if active_cluster_count is None and fallback_cluster_count is not None:
+        active_cluster_count = fallback_cluster_count
+
     query_load: list[QueryLoadPoint] = []
     try:
         raw_load = fetch_query_load_timeline(warehouse_id, start_time, end_time)
@@ -175,10 +183,12 @@ def _fetch_activity(
     except Exception as exc:
         logger.warning("Failed to fetch query load timeline: %s", exc)
 
+    peak_concurrent = max((pt.running for pt in query_load), default=0)
+
     return WarehouseActivity(
         time_window_start=start_time,
         time_window_end=end_time,
-        concurrent_query_count=concurrent["total_queries"],
+        concurrent_query_count=peak_concurrent,
         queued_query_count=concurrent["queued_queries"],
         total_queries_in_window=concurrent["total_queries"],
         active_cluster_count=active_cluster_count,

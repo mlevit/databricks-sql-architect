@@ -235,17 +235,17 @@ function ActivityCard({ activity }: { activity: WarehouseActivity }) {
             <span className="inline-flex items-center gap-1.5 text-[0.68rem] text-slate-500">
               <span className="w-3 h-2.5 rounded-sm bg-orange-400 opacity-80" /> Queued
             </span>
-            {hasEvents && (
+            {hasEvents && (<>
               <span className="inline-flex items-center gap-1.5 text-[0.68rem] text-slate-500">
                 <span className="w-3 h-0.5 bg-amber-400 inline-block" /> Cluster count
               </span>
-            )}
-            <span className="inline-flex items-center gap-1.5 text-[0.68rem] text-slate-500">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" /> Scale up
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-[0.68rem] text-slate-500">
-              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Scale down
-            </span>
+              <span className="inline-flex items-center gap-1.5 text-[0.68rem] text-slate-500">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" /> Scale up
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-[0.68rem] text-slate-500">
+                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Scale down
+              </span>
+            </>)}
             <span className="inline-flex items-center gap-1.5 text-[0.68rem] text-slate-500">
               <span className="w-4 h-2.5 bg-blue-500/10 border border-dashed border-blue-500/30 inline-block rounded-sm" /> Query window
             </span>

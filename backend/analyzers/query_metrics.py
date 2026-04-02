@@ -4,6 +4,8 @@ import json
 import logging
 from typing import Any
 
+import sqlglot
+
 from backend.models import Category, QueryMetrics, Recommendation, Severity
 
 logger = logging.getLogger(__name__)
@@ -17,6 +19,19 @@ READ_TO_PRODUCED_RATIO = 100
 READ_TO_PRODUCED_MIN_ROWS = 1_000_000
 HIGH_FETCH_RATIO = 0.3
 LOW_PARALLELISM = 2.0
+
+
+def _format_sql(raw: str) -> str:
+    """Pretty-print SQL using sqlglot; falls back to the original text on failure."""
+    if not raw or not raw.strip():
+        return raw
+    try:
+        formatted = sqlglot.transpile(
+            raw, read="databricks", write="databricks", pretty=True
+        )
+        return formatted[0] if formatted else raw
+    except Exception:
+        return raw
 
 
 def build_query_metrics(row: dict[str, Any]) -> QueryMetrics:
@@ -45,7 +60,7 @@ def build_query_metrics(row: dict[str, Any]) -> QueryMetrics:
 
     return QueryMetrics(
         statement_id=row.get("statement_id", ""),
-        statement_text=row.get("statement_text", ""),
+        statement_text=_format_sql(row.get("statement_text", "")),
         execution_status=row.get("execution_status", "UNKNOWN"),
         total_duration_ms=_int("total_duration_ms"),
         compilation_duration_ms=_int("compilation_duration_ms"),
