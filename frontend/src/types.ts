@@ -42,6 +42,8 @@ export interface QueryMetrics {
 
 export interface TableInfo {
   full_name: string;
+  table_type: string | null;
+  view_definition: string | null;
   format: string | null;
   clustering_columns: string[];
   partition_columns: string[];
@@ -53,6 +55,7 @@ export interface TableInfo {
   stats_num_rows: number | null;
   stats_total_size: number | null;
   recommendations: Recommendation[];
+  underlying_tables: TableInfo[];
 }
 
 export interface PlanHighlight {

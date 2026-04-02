@@ -48,6 +48,14 @@ def _noop_progress(_step: int, _label: str, _status: str) -> None:
     pass
 
 
+def _collect_all_recommendations(table: TableInfo) -> list[Recommendation]:
+    """Recursively collect recommendations from a table and its underlying tables."""
+    recs = list(table.recommendations)
+    for child in table.underlying_tables:
+        recs.extend(_collect_all_recommendations(child))
+    return recs
+
+
 _PLAN_WARNING_IMPACTS: list[tuple[str, int]] = [
     ("Cartesian product", 9),
     ("nested loop join", 9),
@@ -272,7 +280,7 @@ def run_analysis(
     tables, table_warnings = analyze_tables(parsed.tables, parsed)
     all_warnings.extend(table_warnings)
     for t in tables:
-        all_recs.extend(t.recommendations)
+        all_recs.extend(_collect_all_recommendations(t))
     progress(3, STEPS[3], "done")
 
     # Step 5 — Execution plan (best-effort)

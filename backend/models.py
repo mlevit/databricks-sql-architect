@@ -73,6 +73,8 @@ class ColumnInfo(BaseModel):
 
 class TableInfo(BaseModel):
     full_name: str
+    table_type: Optional[str] = None
+    view_definition: Optional[str] = None
     format: Optional[str] = None
     clustering_columns: list[str] = Field(default_factory=list)
     partition_columns: list[str] = Field(default_factory=list)
@@ -85,6 +87,7 @@ class TableInfo(BaseModel):
     stats_num_rows: Optional[int] = None
     stats_total_size: Optional[int] = None
     recommendations: list[Recommendation] = Field(default_factory=list)
+    underlying_tables: list[TableInfo] = Field(default_factory=list)
 
 
 class PlanHighlight(BaseModel):

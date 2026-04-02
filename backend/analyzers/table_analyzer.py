@@ -8,7 +8,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from backend.analyzers.sql_parser import ParsedQuery
+from backend.analyzers.sql_parser import ParsedQuery, parse_query
 from backend.db import execute_sql, get_client
 from backend.models import Category, ColumnInfo, Recommendation, Severity, TableInfo
 
@@ -20,6 +20,7 @@ LARGE_TABLE_THRESHOLD = 10 * 1024 * 1024 * 1024  # 10 GB
 OVER_PARTITIONED_FILE_RATIO = 5  # files per MB on average
 WIDE_TABLE_COLUMN_THRESHOLD = 100
 UNDER_PARTITIONED_SIZE_THRESHOLD = 1024 * 1024 * 1024 * 1024  # 1 TB per partition
+MAX_VIEW_RECURSION_DEPTH = 5
 
 _HIGH_CARDINALITY_KEY_PATTERNS = re.compile(
     r"(uuid|guid|request_id|trace_id|session_id|transaction_id|correlation_id)$",
@@ -82,6 +83,25 @@ def _extract_error_message(exc: Exception) -> str:
 def _unquote_table_name(name: str) -> str:
     """Strip backtick quoting from a fully-qualified table name for API calls."""
     return ".".join(part.strip("`") for part in name.split("."))
+
+
+def _qualify_table_name(child_name: str, parent_full_name: str) -> str:
+    """Ensure *child_name* is fully qualified (catalog.schema.table).
+
+    If the child only has 1 or 2 parts, inherit the missing catalog/schema
+    from *parent_full_name* (which must be 3-part).
+    """
+    parent_parts = [p.strip("`") for p in parent_full_name.split(".")]
+    child_parts = [p.strip("`") for p in child_name.split(".")]
+
+    if len(parent_parts) < 3 or len(child_parts) >= 3:
+        return child_name
+
+    if len(child_parts) == 1:
+        return f"{parent_parts[0]}.{parent_parts[1]}.{child_parts[0]}"
+    if len(child_parts) == 2:
+        return f"{parent_parts[0]}.{child_parts[0]}.{child_parts[1]}"
+    return child_name
 
 
 def is_poor_clustering_candidate(col_name: str) -> bool:
@@ -159,10 +179,11 @@ def fetch_table_columns(
 def fetch_table_cbo_stats(
     table_name: str,
 ) -> tuple[dict[str, Any], str | None]:
-    """Fetch statistics via the Unity Catalog Tables API.
+    """Fetch statistics and catalog metadata via the Unity Catalog Tables API.
 
     The Tables API ``properties`` map contains ``spark.sql.statistics.*``
     keys when ANALYZE TABLE has been run (manually or via AUTO_STATS).
+    Also extracts ``table_type`` and ``view_definition`` for view resolution.
 
     Returns a tuple of (stats_dict, warning_or_none).
     """
@@ -170,6 +191,8 @@ def fetch_table_cbo_stats(
         "has_cbo_stats": False,
         "num_rows": None,
         "total_size": None,
+        "table_type": None,
+        "view_definition": None,
     }
     if not _is_safe_table_name(table_name):
         return empty, None
@@ -181,10 +204,13 @@ def fetch_table_cbo_stats(
         num_rows_str = props.get("spark.sql.statistics.numRows")
         total_size_str = props.get("spark.sql.statistics.totalSize")
         has_stats = num_rows_str is not None or total_size_str is not None
+        table_type = str(table_info.table_type.value) if table_info.table_type else None
         return {
             "has_cbo_stats": has_stats,
             "num_rows": int(num_rows_str) if num_rows_str else None,
             "total_size": int(total_size_str) if total_size_str else None,
+            "table_type": table_type,
+            "view_definition": table_info.view_definition,
         }, None
     except Exception as exc:
         logger.warning("Failed to fetch catalog properties for %s: %s", table_name, exc)
@@ -197,7 +223,18 @@ def fetch_table_cbo_stats(
 def analyze_tables(
     table_names: list[str],
     parsed_query: ParsedQuery,
+    *,
+    _seen_tables: set[str] | None = None,
+    _depth: int = 0,
 ) -> tuple[list[TableInfo], list[str]]:
+    if _seen_tables is None:
+        _seen_tables = set()
+
+    table_names = [
+        n for n in table_names if n.lower() not in _seen_tables
+    ]
+    _seen_tables.update(n.lower() for n in table_names)
+
     fetchable = [n for n in table_names if not n.lower().startswith("system.")]
     system_tables = [n for n in table_names if n.lower().startswith("system.")]
 
@@ -208,6 +245,8 @@ def analyze_tables(
         "has_cbo_stats": False,
         "num_rows": None,
         "total_size": None,
+        "table_type": None,
+        "view_definition": None,
     }
 
     warnings: list[str] = []
@@ -263,9 +302,25 @@ def analyze_tables(
             results.append(TableInfo(full_name=name))
             continue
 
+        cbo = cbo_stats_map.get(name, _empty_cbo)
         detail = details_map.get(name)
+
         if detail is None:
-            results.append(TableInfo(full_name=name))
+            columns = columns_map.get(name, [])
+            table_type = cbo.get("table_type")
+            view_definition = cbo.get("view_definition")
+            results.append(
+                TableInfo(
+                    full_name=name,
+                    table_type=table_type,
+                    view_definition=view_definition,
+                    column_count=len(columns) if columns else None,
+                    columns=columns,
+                    has_cbo_stats=cbo["has_cbo_stats"],
+                    stats_num_rows=cbo["num_rows"],
+                    stats_total_size=cbo["total_size"],
+                )
+            )
             continue
 
         clustering = _parse_list(detail.get("clusteringColumns"))
@@ -281,7 +336,6 @@ def analyze_tables(
                 props = {}
 
         columns = columns_map.get(name, [])
-        cbo = cbo_stats_map.get(name, _empty_cbo)
 
         recs = _analyze_single_table(
             name,
@@ -299,6 +353,7 @@ def analyze_tables(
         results.append(
             TableInfo(
                 full_name=name,
+                table_type=cbo.get("table_type"),
                 format=table_format,
                 clustering_columns=clustering,
                 partition_columns=partitions,
@@ -313,6 +368,32 @@ def analyze_tables(
                 recommendations=recs,
             )
         )
+
+    if _depth < MAX_VIEW_RECURSION_DEPTH:
+        for table_info in results:
+            if (
+                table_info.table_type
+                and table_info.table_type.upper() == "VIEW"
+                and table_info.view_definition
+            ):
+                view_parsed = parse_query(table_info.view_definition)
+                qualified = [
+                    _qualify_table_name(n, table_info.full_name)
+                    for n in view_parsed.tables
+                ]
+                child_names = [
+                    n for n in qualified
+                    if n.lower() not in _seen_tables
+                ]
+                if child_names:
+                    child_tables, child_warnings = analyze_tables(
+                        child_names,
+                        view_parsed,
+                        _seen_tables=_seen_tables,
+                        _depth=_depth + 1,
+                    )
+                    table_info.underlying_tables = child_tables
+                    warnings.extend(child_warnings)
 
     seen = set()
     deduped_warnings = []

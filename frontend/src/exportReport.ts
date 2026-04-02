@@ -82,31 +82,47 @@ function recMarkdown(r: Recommendation): string {
   return lines.join("\n");
 }
 
+function tableMarkdownEntry(t: TableInfo, depth: number): string {
+  const prefix = "#".repeat(Math.min(depth + 3, 6));
+  const lines: string[] = [];
+  const typeLabel = t.table_type?.toUpperCase() === "VIEW"
+    ? ` (${t.table_type})`
+    : "";
+  lines.push(`${prefix} \`${t.full_name}\`${typeLabel}\n`);
+  const attrs: string[] = [];
+  if (t.format) attrs.push(`Format: ${t.format}`);
+  if (t.num_files != null) attrs.push(`Files: ${fmtNum(t.num_files)}`);
+  if (t.size_in_bytes != null) attrs.push(`Size: ${humanBytes(t.size_in_bytes)}`);
+  if (t.clustering_columns.length > 0) attrs.push(`Clustering: ${t.clustering_columns.join(", ")}`);
+  if (t.partition_columns.length > 0) attrs.push(`Partitioning: ${t.partition_columns.join(", ")}`);
+  if (t.has_cbo_stats) {
+    let stats = "CBO Stats: collected";
+    if (t.stats_num_rows != null) stats += ` (${fmtNum(t.stats_num_rows)} rows)`;
+    attrs.push(stats);
+  } else {
+    attrs.push("CBO Stats: not collected");
+  }
+  if (attrs.length) lines.push(attrs.join(" · ") + "\n");
+  if (t.recommendations.length > 0) {
+    for (const r of t.recommendations) {
+      lines.push(recMarkdown(r));
+    }
+  }
+  if (t.underlying_tables && t.underlying_tables.length > 0) {
+    lines.push(`\n**Underlying Tables:**\n`);
+    for (const child of t.underlying_tables) {
+      lines.push(tableMarkdownEntry(child, depth + 1));
+    }
+  }
+  return lines.join("\n");
+}
+
 function tablesMarkdown(tables: TableInfo[]): string {
   if (tables.length === 0) return "";
   const lines: string[] = [];
   lines.push("## Tables\n");
   for (const t of tables) {
-    lines.push(`### \`${t.full_name}\`\n`);
-    const attrs: string[] = [];
-    if (t.format) attrs.push(`Format: ${t.format}`);
-    if (t.num_files != null) attrs.push(`Files: ${fmtNum(t.num_files)}`);
-    if (t.size_in_bytes != null) attrs.push(`Size: ${humanBytes(t.size_in_bytes)}`);
-    if (t.clustering_columns.length > 0) attrs.push(`Clustering: ${t.clustering_columns.join(", ")}`);
-    if (t.partition_columns.length > 0) attrs.push(`Partitioning: ${t.partition_columns.join(", ")}`);
-    if (t.has_cbo_stats) {
-      let stats = "CBO Stats: collected";
-      if (t.stats_num_rows != null) stats += ` (${fmtNum(t.stats_num_rows)} rows)`;
-      attrs.push(stats);
-    } else {
-      attrs.push("CBO Stats: not collected");
-    }
-    if (attrs.length) lines.push(attrs.join(" · ") + "\n");
-    if (t.recommendations.length > 0) {
-      for (const r of t.recommendations) {
-        lines.push(recMarkdown(r));
-      }
-    }
+    lines.push(tableMarkdownEntry(t, 0));
   }
   return lines.join("\n");
 }
@@ -208,6 +224,34 @@ const SEVERITY_BG: Record<string, string> = {
   info: "rgba(59,130,246,0.08)",
 };
 
+function tableHtmlEntry(t: TableInfo, depth: number): string {
+  const indent = depth * 16;
+  let html = `<div style="border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px 16px;margin-bottom:8px;margin-left:${indent}px;background:rgba(255,255,255,0.02);${depth > 0 ? "border-left:2px solid rgba(217,70,239,0.3);" : ""}">`;
+  html += `<div style="font-family:monospace;font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;">${escHtml(t.full_name)}`;
+  const tt = t.table_type?.toUpperCase();
+  if (tt === "VIEW") {
+    html += ` <span style="font-size:10px;text-transform:uppercase;background:linear-gradient(135deg,#d946ef,#ec4899);color:#fff;padding:2px 6px;border-radius:8px;font-weight:600;letter-spacing:0.05em;">${escHtml(t.table_type!)}</span>`;
+  }
+  if (t.format) html += ` <span style="font-size:10px;text-transform:uppercase;background:linear-gradient(135deg,#14b8a6,#22d3ee);color:#fff;padding:2px 6px;border-radius:8px;font-weight:600;letter-spacing:0.05em;">${escHtml(t.format)}</span>`;
+  html += `</div>`;
+  const attrs: string[] = [];
+  if (t.num_files != null) attrs.push(`${fmtNum(t.num_files)} files`);
+  if (t.size_in_bytes != null) attrs.push(humanBytes(t.size_in_bytes));
+  if (t.clustering_columns.length > 0) attrs.push(`Clustering: ${t.clustering_columns.join(", ")}`);
+  if (t.partition_columns.length > 0) attrs.push(`Partitioning: ${t.partition_columns.join(", ")}`);
+  attrs.push(`CBO Stats: ${t.has_cbo_stats ? "collected" : "not collected"}`);
+  html += `<div style="font-size:12px;color:#94a3b8;">${attrs.map(escHtml).join(" · ")}</div>`;
+  for (const r of t.recommendations) html += recHtml(r);
+  if (t.underlying_tables && t.underlying_tables.length > 0) {
+    html += `<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#64748b;font-weight:600;margin:10px 0 6px;">Underlying Tables</div>`;
+    for (const child of t.underlying_tables) {
+      html += tableHtmlEntry(child, depth + 1);
+    }
+  }
+  html += `</div>`;
+  return html;
+}
+
 function recHtml(r: Recommendation): string {
   const color = SEVERITY_COLOR[r.severity] ?? "#94a3b8";
   const bg = SEVERITY_BG[r.severity] ?? "transparent";
@@ -295,19 +339,7 @@ export function generateHtml(result: AnalysisResult): string {
   if (result.tables.length > 0) {
     body += `<h2 style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#64748b;font-weight:600;margin:28px 0 10px;">Tables</h2>`;
     for (const t of result.tables) {
-      body += `<div style="border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px 16px;margin-bottom:8px;background:rgba(255,255,255,0.02);">`;
-      body += `<div style="font-family:monospace;font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;">${escHtml(t.full_name)}`;
-      if (t.format) body += ` <span style="font-size:10px;text-transform:uppercase;background:linear-gradient(135deg,#14b8a6,#22d3ee);color:#fff;padding:2px 6px;border-radius:8px;font-weight:600;letter-spacing:0.05em;">${escHtml(t.format)}</span>`;
-      body += `</div>`;
-      const attrs: string[] = [];
-      if (t.num_files != null) attrs.push(`${fmtNum(t.num_files)} files`);
-      if (t.size_in_bytes != null) attrs.push(humanBytes(t.size_in_bytes));
-      if (t.clustering_columns.length > 0) attrs.push(`Clustering: ${t.clustering_columns.join(", ")}`);
-      if (t.partition_columns.length > 0) attrs.push(`Partitioning: ${t.partition_columns.join(", ")}`);
-      attrs.push(`CBO Stats: ${t.has_cbo_stats ? "collected" : "not collected"}`);
-      body += `<div style="font-size:12px;color:#94a3b8;">${attrs.map(escHtml).join(" · ")}</div>`;
-      for (const r of t.recommendations) body += recHtml(r);
-      body += `</div>`;
+      body += tableHtmlEntry(t, 0);
     }
   }
 
